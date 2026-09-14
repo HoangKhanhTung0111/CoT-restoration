@@ -73,7 +73,7 @@ python -m hybrid_cot_nafnet.train_kaggle \
   --output-dir /kaggle/working/cot_nafnet_output \
   --model hybrid --preset gopro32 --pretrained auto \
   --epochs 100 --max-minutes 0 \
-  --crop-size 256 --batch-size 2 --microbatch-size 1 \
+  --crop-size 256 --batch-size 4 --microbatch-size 2 --multi-gpu \
   --patches-per-image 2 --num-workers 2
 ```
 

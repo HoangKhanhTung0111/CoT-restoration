@@ -30,3 +30,7 @@ alwaysApply: true
 - Prefer importing the project notebook from GitHub. Its bootstrap cell clones
   `https://github.com/HoangKhanhTung0111/CoT-restoration.git`; the user should
   not need to copy individual cells.
+- Kaggle T4 sessions expose two T4 GPUs while the P100 option exposes one P100.
+  The user intends to select T4; training should use both visible T4 devices and
+  record per-device memory. Do not assume evaluation batch size one benefits
+  from two GPUs.

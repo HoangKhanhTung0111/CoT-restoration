@@ -64,6 +64,9 @@ When assigned tasks, follow these step-by-step instructions:
 ### Task 3: Kaggle-Optimized Training Script (`train_kaggle.py`)
 * Write a concise pure PyTorch training loop to minimize Kaggle dependency risk.
 * Support Mixed Precision (`torch.cuda.amp.autocast()`) for maximum training speed.
+* Kaggle exposes two GPUs for the T4 option and one GPU for P100. The user will
+  select T4, so training should use both visible T4 devices and record peak
+  memory per device. Do not claim a 2x speedup before measuring a real epoch.
 * Use CosineAnnealingLR and AdamW optimizer.
 * Add progress logging suitable for Kaggle notebooks.
 * Save an experiment record for every run: config, environment, Git commit, dataset manifest, pretrained compatibility report, epoch log, summary, and checkpoints.

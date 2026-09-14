@@ -41,6 +41,12 @@ paired degradation views of the same crop, multi-label degradation supervision,
 content consistency, content/degradation decorrelation, skip gating, and a
 three-epoch adapter warm-up with the backbone frozen.
 
+Training automatically wraps the model with PyTorch `DataParallel` when Kaggle
+exposes two T4 GPUs. The notebook uses logical batch 4 and microbatch 2; paired
+views make each microbatch contain four images, normally split as two images per
+GPU. Evaluation remains single-image tiled inference, where a second GPU offers
+little benefit.
+
 Six ordered ablations are recorded in `configs/ablation_matrix.json`. After
 multiple runs, collect their saved JSON metrics with:
 

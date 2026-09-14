@@ -91,6 +91,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-gates", action=argparse.BooleanOptionalAction, default=True
     )
+    parser.add_argument(
+        "--multi-gpu",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use all visible CUDA devices through DataParallel when more than one exists.",
+    )
     parser.add_argument("--freeze-backbone-epochs", type=int, default=3)
     parser.add_argument("--backbone-lr-scale", type=float, default=0.1)
     parser.add_argument("--grad-clip", type=float, default=1.0)
@@ -180,6 +186,12 @@ def _environment_info(device: torch.device) -> Dict[str, object]:
         "cuda_version": torch.version.cuda,
         "device": str(device),
         "gpu": torch.cuda.get_device_name(0) if device.type == "cuda" else None,
+        "gpu_count": torch.cuda.device_count() if device.type == "cuda" else 0,
+        "gpus": (
+            [torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())]
+            if device.type == "cuda"
+            else []
+        ),
     }
 
 
@@ -244,7 +256,7 @@ def validate(
         gt = batch["gt"].to(device, non_blocking=True)
         labels = batch["label"].to(device, non_blocking=True)
         with amp_context(device, use_amp):
-            if hasattr(model, "cot_adapter"):
+            if has_cot_adapter(model):
                 prediction, auxiliary = model(lq, return_aux=True)
                 bce = F.binary_cross_entropy_with_logits(
                     auxiliary["degradation_logits"].float(), labels.float()
@@ -256,7 +268,7 @@ def validate(
                 false_negative += (~predicted_labels & target_labels).sum().item()
                 exact += predicted_labels.eq(target_labels).all(dim=1).sum().item()
                 label_count += labels.numel()
-                gate_sum += auxiliary["gate_mean_abs"].item() * lq.shape[0]
+                gate_sum += auxiliary["gate_mean_abs"].float().mean().item() * lq.shape[0]
             else:
                 prediction, bce = model(lq), torch.zeros((), device=device)
         mse = (prediction.clamp(0, 1).float() - gt.float()).square().mean(dim=(1, 2, 3))
@@ -285,7 +297,7 @@ def atomic_save(payload: dict, path: Path) -> None:
 def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, args):
     return {
         "format_version": 2,
-        "model": model.state_dict(),
+        "model": unwrap_model(model).state_dict(),
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
         "scaler": scaler.state_dict(),
@@ -312,9 +324,17 @@ def embedding_decorrelation_loss(content: Tensor, degradation: Tensor) -> Tensor
 
 
 def set_backbone_trainable(model: nn.Module, trainable: bool) -> None:
-    for name, parameter in model.named_parameters():
+    for name, parameter in unwrap_model(model).named_parameters():
         if not name.startswith("cot_adapter."):
             parameter.requires_grad_(trainable)
+
+
+def unwrap_model(model: nn.Module) -> nn.Module:
+    return model.module if isinstance(model, nn.DataParallel) else model
+
+
+def has_cot_adapter(model: nn.Module) -> bool:
+    return hasattr(unwrap_model(model), "cot_adapter")
 
 
 def main() -> None:
@@ -439,13 +459,13 @@ def main() -> None:
                 "--allow-partial-pretrained for a diagnostic run."
             )
 
-    if hasattr(model, "cot_adapter"):
+    if has_cot_adapter(model):
         backbone_parameters = [
             parameter
             for name, parameter in model.named_parameters()
             if not name.startswith("cot_adapter.")
         ]
-        adapter_parameters = list(model.cot_adapter.parameters())
+        adapter_parameters = list(unwrap_model(model).cot_adapter.parameters())
         optimizer_groups = [
             {
                 "params": backbone_parameters,
@@ -481,6 +501,16 @@ def main() -> None:
         best_psnr = float(resume.get("best_psnr", best_psnr))
         print(f"Resumed from epoch {start_epoch}")
 
+    gpu_ids = list(range(torch.cuda.device_count())) if device.type == "cuda" else []
+    if args.multi_gpu and len(gpu_ids) > 1:
+        model = nn.DataParallel(model, device_ids=gpu_ids, output_device=gpu_ids[0])
+        print(
+            f"Multi-GPU enabled with DataParallel on {len(gpu_ids)} devices: "
+            + ", ".join(torch.cuda.get_device_name(index) for index in gpu_ids)
+        )
+    else:
+        print("Multi-GPU disabled or fewer than two CUDA devices are visible")
+
     # Cheap preflight catches tensor/channel mistakes before a long Kaggle run.
     sample = train_set[0]["lq"][None].to(device)
     with torch.no_grad(), amp_context(device, use_amp):
@@ -490,6 +520,8 @@ def main() -> None:
     del sample, probe
     if device.type == "cuda":
         torch.cuda.empty_cache()
+        for index in gpu_ids:
+            torch.cuda.reset_peak_memory_stats(index)
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     psnr_loss = PSNRLoss()
@@ -511,7 +543,7 @@ def main() -> None:
     last_validation: Dict[str, float] = {}
     for epoch in range(start_epoch, args.epochs):
         backbone_trainable = not (
-            hasattr(model, "cot_adapter") and epoch < args.freeze_backbone_epochs
+            has_cot_adapter(model) and epoch < args.freeze_backbone_epochs
         )
         set_backbone_trainable(model, backbone_trainable)
         if epoch == start_epoch or epoch == args.freeze_backbone_epochs:
@@ -556,7 +588,7 @@ def main() -> None:
                             ]
                         )
                     with amp_context(device, use_amp):
-                        if hasattr(model, "cot_adapter"):
+                        if has_cot_adapter(model):
                             prediction, auxiliary = model(lq, return_aux=True)
                             degradation = F.binary_cross_entropy_with_logits(
                                 auxiliary["degradation_logits"].float(), labels.float()
@@ -574,12 +606,12 @@ def main() -> None:
                             )
                         else:
                             content = torch.zeros((), device=device)
-                        if hasattr(model, "cot_adapter"):
+                        if has_cot_adapter(model):
                             decorrelation = embedding_decorrelation_loss(
                                 auxiliary["content_embedding"],
                                 auxiliary["degradation_embedding"],
                             )
-                            gate = auxiliary["gate_regularization"]
+                            gate = auxiliary["gate_regularization"].mean()
                         else:
                             decorrelation = torch.zeros((), device=device)
                             gate = torch.zeros((), device=device)
@@ -681,6 +713,15 @@ def main() -> None:
             "preset": args.preset,
             "parameters": parameter_counts,
             "last_validation": last_validation,
+            "multi_gpu": isinstance(model, nn.DataParallel),
+            "gpu_peak_memory_mb": (
+                {
+                    str(index): torch.cuda.max_memory_allocated(index) / 1024**2
+                    for index in gpu_ids
+                }
+                if device.type == "cuda"
+                else {}
+            ),
         },
     )
     print(f"Training complete. Best validation PSNR: {best_psnr:.4f} dB")

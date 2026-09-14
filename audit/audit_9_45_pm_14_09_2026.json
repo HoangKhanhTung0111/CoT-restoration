@@ -1,0 +1,121 @@
+{
+  "dataset": {
+    "root": "/kaggle/input/datasets/mintesnotfikir/cdd-11-30",
+    "train_scenes": 20,
+    "validation_scenes": 5,
+    "test_scenes": 5,
+    "train_samples": 220,
+    "validation_samples": 55,
+    "test_samples": 55,
+    "train_validation_overlap": [],
+    "development_test_overlap": [],
+    "train_scene_ids": [
+      "00009",
+      "00011",
+      "00012",
+      "00015",
+      "00029",
+      "00031",
+      "00038",
+      "00042",
+      "00057",
+      "00061",
+      "00064",
+      "00068",
+      "00084",
+      "00085",
+      "00120",
+      "00130",
+      "00139",
+      "00142",
+      "00144",
+      "00154"
+    ],
+    "validation_scene_ids": [
+      "00059",
+      "00065",
+      "00110",
+      "00122",
+      "00127"
+    ],
+    "test_scene_ids": [
+      "00002",
+      "00008",
+      "00010",
+      "00013",
+      "00018"
+    ]
+  },
+  "pretrained_root": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel",
+  "checkpoints": {
+    "gopro32": {
+      "path": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-GoPro-width32.pth",
+      "exists": true,
+      "bytes": 68671121,
+      "checkpoint_tensors": 664,
+      "model_tensors": 664,
+      "compatible_tensors": 664,
+      "missing_tensors": 0,
+      "unexpected_tensors": 0,
+      "mismatched_tensors": 0,
+      "parameters": {
+        "total": 17111907,
+        "adapter": 0,
+        "backbone": 17111907
+      },
+      "fully_compatible": true
+    },
+    "gopro64": {
+      "path": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-GoPro-width64.pth",
+      "exists": true,
+      "bytes": 271778961,
+      "checkpoint_tensors": 664,
+      "model_tensors": 664,
+      "compatible_tensors": 664,
+      "missing_tensors": 0,
+      "unexpected_tensors": 0,
+      "mismatched_tensors": 0,
+      "parameters": {
+        "total": 67888835,
+        "adapter": 0,
+        "backbone": 67888835
+      },
+      "fully_compatible": true
+    },
+    "sidd32": {
+      "path": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-SIDD-width32.pth",
+      "exists": true,
+      "bytes": 116861841,
+      "checkpoint_tensors": 664,
+      "model_tensors": 664,
+      "compatible_tensors": 664,
+      "missing_tensors": 0,
+      "unexpected_tensors": 0,
+      "mismatched_tensors": 0,
+      "parameters": {
+        "total": 29159715,
+        "adapter": 0,
+        "backbone": 29159715
+      },
+      "fully_compatible": true
+    },
+    "sidd64": {
+      "path": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-SIDD-width64.pth",
+      "exists": true,
+      "bytes": 464154961,
+      "checkpoint_tensors": 664,
+      "model_tensors": 664,
+      "compatible_tensors": 664,
+      "missing_tensors": 0,
+      "unexpected_tensors": 0,
+      "mismatched_tensors": 0,
+      "parameters": {
+        "total": 115982915,
+        "adapter": 0,
+        "backbone": 115982915
+      },
+      "fully_compatible": true
+    }
+  },
+  "torch": "2.10.0+cu128"
+}
