@@ -79,29 +79,55 @@ def tiled_inference(
     tile: int,
     overlap: int,
     use_amp: bool,
-) -> Tensor:
+) -> Tuple[Tensor, Dict[str, Tensor]]:
     """Run one image while keeping the full-resolution buffers on CPU."""
     if image_cpu.ndim != 4 or image_cpu.shape[0] != 1:
         raise ValueError("tiled_inference expects a [1,C,H,W] tensor")
     _, _, height, width = image_cpu.shape
     if tile <= 0:
         with amp_context(use_amp):
-            return model(image_cpu.to(device)).float().cpu()
+            if hasattr(model, "cot_adapter"):
+                prediction, auxiliary = model(
+                    image_cpu.to(device), return_aux=True
+                )
+                return prediction.float().cpu(), {
+                    "degradation_logits": auxiliary["degradation_logits"].float().cpu(),
+                    "gate_mean_abs": auxiliary["gate_mean_abs"].float().cpu(),
+                }
+            return model(image_cpu.to(device)).float().cpu(), {}
     y_starts = tile_starts(height, tile, overlap)
     x_starts = tile_starts(width, tile, overlap)
     output = torch.zeros_like(image_cpu, dtype=torch.float32, device="cpu")
     weights = torch.zeros((1, 1, height, width), dtype=torch.float32, device="cpu")
+    logits_sum = None
+    gate_sum = 0.0
+    tile_count = 0
     for top in y_starts:
         for left in x_starts:
             patch_cpu = image_cpu[..., top : min(top + tile, height), left : min(left + tile, width)]
             with amp_context(use_amp):
-                prediction = model(patch_cpu.to(device, non_blocking=True))
+                if hasattr(model, "cot_adapter"):
+                    prediction, auxiliary = model(
+                        patch_cpu.to(device, non_blocking=True), return_aux=True
+                    )
+                    logits = auxiliary["degradation_logits"].float().cpu()
+                    logits_sum = logits if logits_sum is None else logits_sum + logits
+                    gate_sum += auxiliary["gate_mean_abs"].item()
+                else:
+                    prediction = model(patch_cpu.to(device, non_blocking=True))
             prediction = prediction.float().cpu()
             patch_h, patch_w = prediction.shape[-2:]
             output[..., top : top + patch_h, left : left + patch_w] += prediction
             weights[..., top : top + patch_h, left : left + patch_w] += 1.0
+            tile_count += 1
             del prediction
-    return output / weights.clamp_min(1.0)
+    auxiliary_output: Dict[str, Tensor] = {}
+    if logits_sum is not None:
+        auxiliary_output = {
+            "degradation_logits": logits_sum / tile_count,
+            "gate_mean_abs": torch.tensor(gate_sum / tile_count),
+        }
+    return output / weights.clamp_min(1.0), auxiliary_output
 
 
 def calculate_psnr(prediction: Tensor, target: Tensor) -> float:
@@ -200,7 +226,10 @@ def main() -> None:
     model_type = checkpoint.get("model_type", "hybrid")
     preset = checkpoint.get("preset", "nafnet32")
     adapter_hidden = int(checkpoint.get("adapter_hidden", 64))
-    model = build_model(model_type, preset, adapter_hidden)
+    use_skip_gates = bool(checkpoint.get("use_skip_gates", True))
+    model = build_model(
+        model_type, preset, adapter_hidden, use_skip_gates=use_skip_gates
+    )
     model.load_state_dict(checkpoint["model"], strict=True)
     model.to(device).eval()
 
@@ -230,15 +259,17 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: List[Dict[str, object]] = []
     grouped: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    true_positive = false_positive = false_negative = exact_match = 0
 
     for index, batch in enumerate(loader, start=1):
         lq_cpu, gt_cpu = batch["lq"].float(), batch["gt"].float()
         if device.type == "cuda":
             torch.cuda.synchronize()
         started = time.perf_counter()
-        prediction = tiled_inference(
+        prediction, auxiliary = tiled_inference(
             model, lq_cpu, device, args.tile, args.overlap, use_amp
-        ).clamp(0, 1)
+        )
+        prediction = prediction.clamp(0, 1)
         if device.type == "cuda":
             torch.cuda.synchronize()
         latency_ms = (time.perf_counter() - started) * 1000.0
@@ -248,16 +279,28 @@ def main() -> None:
         ssim = calculate_ssim(prediction, gt_cpu)
         input_psnr = calculate_psnr(lq_cpu, gt_cpu)
         grouped[degradation_type].append((psnr, ssim))
-        rows.append(
-            {
-                "type": degradation_type,
-                "scene_id": scene_id,
-                "psnr": psnr,
-                "ssim": ssim,
-                "input_psnr": input_psnr,
-                "latency_ms": latency_ms,
-            }
-        )
+        row: Dict[str, object] = {
+            "type": degradation_type,
+            "scene_id": scene_id,
+            "psnr": psnr,
+            "ssim": ssim,
+            "input_psnr": input_psnr,
+            "latency_ms": latency_ms,
+        }
+        if "degradation_logits" in auxiliary:
+            probabilities = auxiliary["degradation_logits"].sigmoid()[0]
+            predicted_labels = probabilities >= 0.5
+            target_labels = batch["label"][0] >= 0.5
+            true_positive += (predicted_labels & target_labels).sum().item()
+            false_positive += (predicted_labels & ~target_labels).sum().item()
+            false_negative += (~predicted_labels & target_labels).sum().item()
+            is_exact = predicted_labels.eq(target_labels).all().item()
+            exact_match += int(is_exact)
+            for name, probability in zip(DEGRADATIONS, probabilities.tolist()):
+                row[f"prob_{name}"] = probability
+            row["degradation_exact_match"] = bool(is_exact)
+            row["gate_mean_abs"] = auxiliary["gate_mean_abs"].item()
+        rows.append(row)
         if args.save_images:
             save_image(prediction, output_dir / "images" / degradation_type / f"{scene_id}.png")
         print(
@@ -275,13 +318,21 @@ def main() -> None:
     }
     macro_psnr = float(np.mean([value["psnr"] for value in per_type.values()]))
     macro_ssim = float(np.mean([value["ssim"] for value in per_type.values()]))
+    f1_denominator = 2 * true_positive + false_positive + false_negative
     summary = {
         "model_type": model_type,
         "preset": preset,
+        "use_skip_gates": use_skip_gates,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "samples": len(rows),
         "macro_psnr": macro_psnr,
         "macro_ssim": macro_ssim,
+        "degradation_micro_f1": (
+            2 * true_positive / f1_denominator if f1_denominator else None
+        ),
+        "degradation_exact_match": (
+            exact_match / len(rows) if hasattr(model, "cot_adapter") else None
+        ),
         "mean_latency_ms": float(np.mean([row["latency_ms"] for row in rows])),
         "peak_gpu_memory_mb": (
             torch.cuda.max_memory_allocated() / 1024**2 if device.type == "cuda" else 0.0

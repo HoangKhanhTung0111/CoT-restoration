@@ -9,12 +9,14 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
 - `modules/gated_cot_adapter.py`: bottleneck reasoning, four-label degradation
   prediction, and zero-initialized affine gates for every skip connection.
 - `datasets/cdd11.py`: paired CDD-11 loader with a scene-level validation split.
-- `train_kaggle.py`: AMP training, microbatch accumulation, checkpoint/resume,
-  validation, and a wall-clock safety limit.
+- `train_kaggle.py`: AMP training, same-scene paired views, content consistency,
+  degradation supervision, adapter warm-up, checkpoint/resume, and experiment
+  metadata.
 - `evaluate.py`: full CDD-11 evaluation using memory-safe tiled inference.
 
-The current pipeline postpones paired content-consistency loss. That loss needs
-a second degradation view of each scene and materially raises activation memory.
+The research path uses the same spatial crop and augmentation for two different
+degradation views of one scene. Set `--content-weight 0` to disable this branch
+for its ablation. Use `--no-skip-gates` for the bottleneck-only ablation.
 
 ## Local smoke checks
 
@@ -44,6 +46,12 @@ Audit all pairs and all four pretrained checkpoints before training:
 
 ```bash
 python -m hybrid_cot_nafnet.audit_kaggle
+```
+
+Optionally measure the four pretrained models zero-shot on the CDD-11 subset:
+
+```bash
+python -m hybrid_cot_nafnet.probe_pretrained_cdd11
 ```
 
 First run one epoch using the 17M GoPro-width32 initialization:
@@ -77,6 +85,14 @@ python -m hybrid_cot_nafnet.evaluate \
   --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
   --output-dir /kaggle/working/cot_nafnet_evaluation \
   --tile 256 --overlap 32 --num-workers 2
+```
+
+Aggregate completed baseline/hybrid runs into one comparison table:
+
+```bash
+python -m hybrid_cot_nafnet.summarize_experiments \
+  --experiments-root /kaggle/working/experiments \
+  --output /kaggle/working/experiments/ablation_summary.csv
 ```
 
 To resume an interrupted run, pass the last checkpoint and keep the same model

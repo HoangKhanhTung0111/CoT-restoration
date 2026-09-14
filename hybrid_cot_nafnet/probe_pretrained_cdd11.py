@@ -1,0 +1,164 @@
+"""Measure all four official NAFNet checkpoints zero-shot on CDD-11-30."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import gc
+import json
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from .datasets import CDD11Dataset, find_cdd11_root
+from .evaluate import calculate_psnr, calculate_ssim, tiled_inference
+from .model import build_model, count_parameters
+from .project_config import (
+    KAGGLE_CDD11_ROOT,
+    KAGGLE_PRETRAINED_ROOT,
+    PRETRAINED_FILENAMES,
+)
+from .train_kaggle import load_compatible_weights
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-root", default=str(KAGGLE_CDD11_ROOT))
+    parser.add_argument("--pretrained-root", default=str(KAGGLE_PRETRAINED_ROOT))
+    parser.add_argument(
+        "--output-dir", default="/kaggle/working/pretrained_cdd11_probe"
+    )
+    parser.add_argument(
+        "--presets",
+        nargs="+",
+        choices=("gopro32", "gopro64", "sidd32", "sidd64"),
+        default=("gopro32", "gopro64", "sidd32", "sidd64"),
+    )
+    parser.add_argument("--tile", type=int, default=256)
+    parser.add_argument("--overlap", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--max-samples", type=int, default=0)
+    parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--allow-cpu", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    if args.tile > 0 and args.tile % 16:
+        raise ValueError("tile must be divisible by 16")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif args.allow_cpu:
+        device = torch.device("cpu")
+    else:
+        raise RuntimeError("Enable a Kaggle GPU or pass --allow-cpu for diagnostics")
+    use_amp = bool(args.amp and device.type == "cuda")
+
+    dataset = CDD11Dataset(
+        find_cdd11_root(args.data_root), mode="test", crop_size=0, augment=False
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=args.num_workers,
+        persistent_workers=args.num_workers > 0,
+    )
+    pretrained_root = Path(args.pretrained_root)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows: List[Dict[str, object]] = []
+    summaries: Dict[str, object] = {}
+
+    for preset in args.presets:
+        checkpoint_path = pretrained_root / PRETRAINED_FILENAMES[preset]
+        model = build_model("baseline", preset).to(device).eval()
+        load_report = load_compatible_weights(model, checkpoint_path)
+        if load_report["backbone_missing"]:
+            raise RuntimeError(f"Incompatible {preset} checkpoint: {load_report}")
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+        grouped: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+        latencies: List[float] = []
+        seen = 0
+        for batch in loader:
+            if args.max_samples > 0 and seen >= args.max_samples:
+                break
+            lq, gt = batch["lq"].float(), batch["gt"].float()
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            started = time.perf_counter()
+            prediction, _ = tiled_inference(
+                model, lq, device, args.tile, args.overlap, use_amp
+            )
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            prediction = prediction.clamp(0, 1)
+            degradation_type = batch["degradation_type"][0]
+            psnr = calculate_psnr(prediction, gt)
+            ssim = calculate_ssim(prediction, gt)
+            grouped[degradation_type].append((psnr, ssim))
+            latencies.append(latency_ms)
+            rows.append(
+                {
+                    "preset": preset,
+                    "type": degradation_type,
+                    "scene_id": batch["scene_id"][0],
+                    "psnr": psnr,
+                    "ssim": ssim,
+                    "latency_ms": latency_ms,
+                }
+            )
+            seen += 1
+            print(
+                f"{preset} [{seen:03d}/{len(dataset)}] {degradation_type} "
+                f"PSNR={psnr:.3f} SSIM={ssim:.4f}",
+                flush=True,
+            )
+        per_type = {
+            name: {
+                "psnr": float(np.mean([value[0] for value in values])),
+                "ssim": float(np.mean([value[1] for value in values])),
+                "count": len(values),
+            }
+            for name, values in sorted(grouped.items())
+        }
+        summaries[preset] = {
+            "checkpoint": str(checkpoint_path),
+            "load_report": load_report,
+            "parameters": count_parameters(model),
+            "samples": seen,
+            "macro_psnr": float(np.mean([value["psnr"] for value in per_type.values()])),
+            "macro_ssim": float(np.mean([value["ssim"] for value in per_type.values()])),
+            "mean_latency_ms": float(np.mean(latencies)),
+            "peak_gpu_memory_mb": (
+                torch.cuda.max_memory_allocated() / 1024**2
+                if device.type == "cuda"
+                else 0.0
+            ),
+            "per_type": per_type,
+        }
+        del model
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    with (output_dir / "metrics.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
+        json.dump(summaries, handle, indent=2, ensure_ascii=False)
+    print(f"Saved pretrained probe to {output_dir}")
+
+
+if __name__ == "__main__":
+    main()

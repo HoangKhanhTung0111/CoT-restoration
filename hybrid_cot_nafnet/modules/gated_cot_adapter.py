@@ -51,6 +51,7 @@ class GatedCoTAdapter(nn.Module):
         hidden_channels: int = 64,
         num_degradations: int = 4,
         modulation_limit: float = 0.1,
+        use_skip_gates: bool = True,
     ) -> None:
         super().__init__()
         if hidden_channels < 4:
@@ -59,6 +60,7 @@ class GatedCoTAdapter(nn.Module):
         self.skip_channels = tuple(int(c) for c in skip_channels)
         self.hidden_channels = int(hidden_channels)
         self.modulation_limit = float(modulation_limit)
+        self.use_skip_gates = bool(use_skip_gates)
 
         self.norm = LayerNorm2d(self.bottleneck_channels)
         self.local_features = nn.Sequential(
@@ -128,15 +130,23 @@ class GatedCoTAdapter(nn.Module):
 
         bottleneck = bottleneck + self.bottleneck_residual(content_map)
         bottleneck = self._modulate(bottleneck, *affine_groups[0])
-        modulated_skips = [
-            self._modulate(skip, *parameters)
-            for skip, parameters in zip(skips, affine_groups[1:])
-        ]
+        if self.use_skip_gates:
+            modulated_skips = [
+                self._modulate(skip, *parameters)
+                for skip, parameters in zip(skips, affine_groups[1:])
+            ]
+            active_affine = affine
+        else:
+            modulated_skips = list(skips)
+            active_affine = affine[:, : 2 * self.bottleneck_channels]
         auxiliary = {
             "degradation_logits": degradation_logits,
             "degradation_embedding": degradation_embedding,
             "content_embedding": content_embedding,
             "plan_embedding": plan,
+            "gate_regularization": torch.tanh(active_affine).abs().mean(),
+            "gate_mean_abs": torch.tanh(active_affine).abs().detach().mean(),
+            "gate_max_abs": torch.tanh(active_affine).abs().detach().amax(),
         }
         return bottleneck, modulated_skips, auxiliary
 

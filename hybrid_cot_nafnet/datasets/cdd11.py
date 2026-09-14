@@ -140,6 +140,7 @@ class CDD11Dataset(Dataset):
         split_seed: int = 42,
         augment: bool = True,
         degradation_types: Optional[Sequence[str]] = None,
+        paired_view: bool = False,
     ) -> None:
         super().__init__()
         if mode not in {"train", "val", "test"}:
@@ -150,6 +151,7 @@ class CDD11Dataset(Dataset):
         self.mode = mode
         self.crop_size = int(crop_size)
         self.augment = bool(augment and mode == "train")
+        self.paired_view = bool(paired_view and mode == "train")
         split_dir = self.root / ("CDD-11_test" if mode == "test" else "CDD-11_train")
         clear_dir = split_dir / "clear"
         if not clear_dir.is_dir():
@@ -209,6 +211,13 @@ class CDD11Dataset(Dataset):
                 )
         self.scene_ids = tuple(selected_ids)
         self.samples = samples
+        self.indices_by_scene: Dict[str, List[int]] = {}
+        for sample_index, sample in enumerate(samples):
+            self.indices_by_scene.setdefault(sample[3], []).append(sample_index)
+        if self.paired_view and any(
+            len(indices) < 2 for indices in self.indices_by_scene.values()
+        ):
+            raise RuntimeError("paired_view requires at least two degradations per scene")
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -216,12 +225,58 @@ class CDD11Dataset(Dataset):
     def __getitem__(self, index: int):
         lq_path, gt_path, label, scene_id, degradation_type = self.samples[index]
         lq, gt = _read_rgb(lq_path), _read_rgb(gt_path)
-        lq, gt = _paired_crop(
-            lq, gt, crop_size=self.crop_size, random_crop=self.mode == "train"
-        )
+        second = None
+        second_label = None
+        second_type = None
+        if self.paired_view:
+            candidates = [item for item in self.indices_by_scene[scene_id] if item != index]
+            second_index = random.choice(candidates)
+            second_path, _, second_label, _, second_type = self.samples[second_index]
+            second = _read_rgb(second_path)
+            if second.shape != lq.shape:
+                raise ValueError(
+                    f"Paired degradation shapes differ: {tuple(lq.shape)} vs {tuple(second.shape)}"
+                )
+
+        if second is None:
+            lq, gt = _pad_to_crop(lq, gt, self.crop_size)
+        else:
+            height, width = lq.shape[-2:]
+            pad_h = max(0, self.crop_size - height)
+            pad_w = max(0, self.crop_size - width)
+            if pad_h or pad_w:
+                padding = (0, pad_w, 0, pad_h)
+                lq = F.pad(lq, padding, mode="replicate")
+                gt = F.pad(gt, padding, mode="replicate")
+                second = F.pad(second, padding, mode="replicate")
+        height, width = lq.shape[-2:]
+        if self.crop_size > 0:
+            if self.mode == "train":
+                top = random.randint(0, height - self.crop_size)
+                left = random.randint(0, width - self.crop_size)
+            else:
+                top = (height - self.crop_size) // 2
+                left = (width - self.crop_size) // 2
+            region = (..., slice(top, top + self.crop_size), slice(left, left + self.crop_size))
+            lq, gt = lq[region], gt[region]
+            if second is not None:
+                second = second[region]
         if self.augment:
-            lq, gt = _augment(lq, gt)
-        return {
+            flip_w = random.random() < 0.5
+            flip_h = random.random() < 0.5
+            transpose = random.random() < 0.5
+            views = [lq, gt] + ([second] if second is not None else [])
+            if flip_w:
+                views = [item.flip(-1) for item in views]
+            if flip_h:
+                views = [item.flip(-2) for item in views]
+            if transpose:
+                views = [item.transpose(-2, -1) for item in views]
+            views = [item.contiguous() for item in views]
+            lq, gt = views[:2]
+            if second is not None:
+                second = views[2]
+        result = {
             "lq": lq,
             "gt": gt,
             "label": label.clone(),
@@ -229,9 +284,18 @@ class CDD11Dataset(Dataset):
             "degradation_type": degradation_type,
             "lq_path": str(lq_path),
         }
+        if second is not None and second_label is not None and second_type is not None:
+            result.update(
+                {
+                    "lq_view2": second,
+                    "label_view2": second_label.clone(),
+                    "degradation_type_view2": second_type,
+                }
+            )
+        return result
 
     def summary(self) -> str:
         return (
             f"CDD11Dataset(mode={self.mode}, scenes={len(self.scene_ids)}, "
-            f"samples={len(self.samples)}, crop={self.crop_size})"
+            f"samples={len(self.samples)}, crop={self.crop_size}, paired_view={self.paired_view})"
         )

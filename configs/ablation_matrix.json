@@ -1,0 +1,71 @@
+{
+  "shared": {
+    "preset": "gopro32",
+    "pretrained": "auto",
+    "seed": 42,
+    "crop_size": 256,
+    "epochs": 100
+  },
+  "runs": [
+    {
+      "name": "a0_nafnet_baseline",
+      "model": "baseline",
+      "skip_gates": false,
+      "degradation_weight": 0.0,
+      "content_weight": 0.0,
+      "decorrelation_weight": 0.0,
+      "gate_weight": 0.0,
+      "freeze_backbone_epochs": 0
+    },
+    {
+      "name": "a1_bottleneck_adapter",
+      "model": "hybrid",
+      "skip_gates": false,
+      "degradation_weight": 0.0,
+      "content_weight": 0.0,
+      "decorrelation_weight": 0.0,
+      "gate_weight": 0.0,
+      "freeze_backbone_epochs": 3
+    },
+    {
+      "name": "a2_bottleneck_skip",
+      "model": "hybrid",
+      "skip_gates": true,
+      "degradation_weight": 0.0,
+      "content_weight": 0.0,
+      "decorrelation_weight": 0.0,
+      "gate_weight": 0.0,
+      "freeze_backbone_epochs": 3
+    },
+    {
+      "name": "a3_degradation_supervision",
+      "model": "hybrid",
+      "skip_gates": true,
+      "degradation_weight": 0.05,
+      "content_weight": 0.0,
+      "decorrelation_weight": 0.0,
+      "gate_weight": 0.0,
+      "freeze_backbone_epochs": 3
+    },
+    {
+      "name": "a4_content_consistency",
+      "model": "hybrid",
+      "skip_gates": true,
+      "degradation_weight": 0.05,
+      "content_weight": 0.02,
+      "decorrelation_weight": 0.0,
+      "gate_weight": 0.0,
+      "freeze_backbone_epochs": 3
+    },
+    {
+      "name": "a5_full",
+      "model": "hybrid",
+      "skip_gates": true,
+      "degradation_weight": 0.05,
+      "content_weight": 0.02,
+      "decorrelation_weight": 0.005,
+      "gate_weight": 0.001,
+      "freeze_backbone_epochs": 3
+    }
+  ]
+}

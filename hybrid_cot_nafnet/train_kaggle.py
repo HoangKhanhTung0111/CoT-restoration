@@ -14,7 +14,7 @@ import sys
 import time
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict
 
 import numpy as np
 import torch
@@ -85,6 +85,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=1e-3)
     parser.add_argument("--fft-weight", type=float, default=0.05)
     parser.add_argument("--degradation-weight", type=float, default=0.05)
+    parser.add_argument("--content-weight", type=float, default=0.02)
+    parser.add_argument("--decorrelation-weight", type=float, default=0.005)
+    parser.add_argument("--gate-weight", type=float, default=0.001)
+    parser.add_argument(
+        "--skip-gates", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument("--freeze-backbone-epochs", type=int, default=3)
+    parser.add_argument("--backbone-lr-scale", type=float, default=0.1)
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
@@ -223,11 +231,14 @@ def make_loader(dataset, batch_size: int, workers: int, sampler=None, shuffle=Fa
 @torch.no_grad()
 def validate(
     model: nn.Module, loader: DataLoader, device: torch.device, use_amp: bool
-) -> Tuple[float, float]:
+) -> Dict[str, float]:
     model.eval()
     psnr_sum = 0.0
     bce_sum = 0.0
     sample_count = 0
+    true_positive = false_positive = false_negative = exact = 0
+    label_count = 0
+    gate_sum = 0.0
     for batch in loader:
         lq = batch["lq"].to(device, non_blocking=True)
         gt = batch["gt"].to(device, non_blocking=True)
@@ -236,16 +247,33 @@ def validate(
             if hasattr(model, "cot_adapter"):
                 prediction, auxiliary = model(lq, return_aux=True)
                 bce = F.binary_cross_entropy_with_logits(
-                    auxiliary["degradation_logits"].float(), labels.float(), reduction="sum"
+                    auxiliary["degradation_logits"].float(), labels.float()
                 )
+                predicted_labels = auxiliary["degradation_logits"].sigmoid() >= 0.5
+                target_labels = labels >= 0.5
+                true_positive += (predicted_labels & target_labels).sum().item()
+                false_positive += (predicted_labels & ~target_labels).sum().item()
+                false_negative += (~predicted_labels & target_labels).sum().item()
+                exact += predicted_labels.eq(target_labels).all(dim=1).sum().item()
+                label_count += labels.numel()
+                gate_sum += auxiliary["gate_mean_abs"].item() * lq.shape[0]
             else:
                 prediction, bce = model(lq), torch.zeros((), device=device)
         mse = (prediction.clamp(0, 1).float() - gt.float()).square().mean(dim=(1, 2, 3))
         psnr_sum += (-10.0 * torch.log10(mse + 1e-8)).sum().item()
-        bce_sum += bce.item()
+        bce_sum += bce.item() * lq.shape[0]
         sample_count += lq.shape[0]
     model.train()
-    return psnr_sum / sample_count, bce_sum / sample_count
+    denominator = 2 * true_positive + false_positive + false_negative
+    return {
+        "psnr": psnr_sum / sample_count,
+        "bce": bce_sum / sample_count,
+        "degradation_micro_f1": (
+            2 * true_positive / denominator if denominator else 0.0
+        ),
+        "degradation_exact_match": exact / sample_count if label_count else 0.0,
+        "gate_mean_abs": gate_sum / sample_count if label_count else 0.0,
+    }
 
 
 def atomic_save(payload: dict, path: Path) -> None:
@@ -256,7 +284,7 @@ def atomic_save(payload: dict, path: Path) -> None:
 
 def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, args):
     return {
-        "format_version": 1,
+        "format_version": 2,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
@@ -266,8 +294,27 @@ def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, ar
         "model_type": args.model,
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
+        "use_skip_gates": args.skip_gates,
         "args": vars(args),
     }
+
+
+def content_consistency_loss(embedding: Tensor, pair_size: int) -> Tensor:
+    first = F.normalize(embedding[:pair_size].float(), dim=1)
+    second = F.normalize(embedding[pair_size:].float(), dim=1)
+    return (1.0 - (first * second).sum(dim=1)).mean()
+
+
+def embedding_decorrelation_loss(content: Tensor, degradation: Tensor) -> Tensor:
+    content = F.normalize(content.float(), dim=1)
+    degradation = F.normalize(degradation.float(), dim=1)
+    return (content * degradation).sum(dim=1).square().mean()
+
+
+def set_backbone_trainable(model: nn.Module, trainable: bool) -> None:
+    for name, parameter in model.named_parameters():
+        if not name.startswith("cot_adapter."):
+            parameter.requires_grad_(trainable)
 
 
 def main() -> None:
@@ -276,6 +323,10 @@ def main() -> None:
         raise ValueError("batch-size and microbatch-size must be positive")
     if args.microbatch_size > args.batch_size:
         args.microbatch_size = args.batch_size
+    if args.freeze_backbone_epochs < 0:
+        raise ValueError("freeze-backbone-epochs must be non-negative")
+    if not 0.0 < args.backbone_lr_scale <= 1.0:
+        raise ValueError("backbone-lr-scale must be in (0, 1]")
     if args.crop_size % 16:
         raise ValueError("crop-size must be divisible by 16 for the four-level NAFNet")
 
@@ -307,6 +358,7 @@ def main() -> None:
         val_fraction=args.val_fraction,
         split_seed=args.seed,
         augment=True,
+        paired_view=args.model == "hybrid" and args.content_weight > 0,
     )
     val_set = CDD11Dataset(
         data_root,
@@ -346,7 +398,12 @@ def main() -> None:
     train_loader = make_loader(train_set, args.batch_size, args.num_workers, sampler=sampler)
     val_loader = make_loader(val_set, 1, args.num_workers)
 
-    model = build_model(args.model, args.preset, args.adapter_hidden).to(device)
+    model = build_model(
+        args.model,
+        args.preset,
+        args.adapter_hidden,
+        use_skip_gates=args.skip_gates,
+    ).to(device)
     parameter_counts = count_parameters(model)
     print(train_set.summary())
     print(val_set.summary())
@@ -382,11 +439,31 @@ def main() -> None:
                 "--allow-partial-pretrained for a diagnostic run."
             )
 
+    if hasattr(model, "cot_adapter"):
+        backbone_parameters = [
+            parameter
+            for name, parameter in model.named_parameters()
+            if not name.startswith("cot_adapter.")
+        ]
+        adapter_parameters = list(model.cot_adapter.parameters())
+        optimizer_groups = [
+            {
+                "params": backbone_parameters,
+                "lr": args.learning_rate * args.backbone_lr_scale,
+                "name": "backbone",
+            },
+            {
+                "params": adapter_parameters,
+                "lr": args.learning_rate,
+                "name": "adapter",
+            },
+        ]
+    else:
+        optimizer_groups = [
+            {"params": list(model.parameters()), "lr": args.learning_rate, "name": "backbone"}
+        ]
     optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.learning_rate,
-        betas=(0.9, 0.9),
-        weight_decay=args.weight_decay,
+        optimizer_groups, betas=(0.9, 0.9), weight_decay=args.weight_decay
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=max(1, args.epochs), eta_min=1e-7
@@ -420,26 +497,64 @@ def main() -> None:
     if not log_path.exists() or start_epoch == 0:
         with log_path.open("w", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(
-                ["epoch", "train_total", "train_restoration", "train_degradation", "val_psnr", "val_bce", "lr", "minutes"]
+                [
+                    "epoch", "train_total", "train_restoration",
+                    "train_degradation", "train_content", "train_decorrelation",
+                    "train_gate", "val_psnr", "val_bce", "val_degradation_micro_f1",
+                    "val_degradation_exact_match", "val_gate_mean_abs",
+                    "backbone_lr", "adapter_lr", "minutes",
+                ]
             )
 
     started_at = time.monotonic()
     stop_for_time = False
+    last_validation: Dict[str, float] = {}
     for epoch in range(start_epoch, args.epochs):
+        backbone_trainable = not (
+            hasattr(model, "cot_adapter") and epoch < args.freeze_backbone_epochs
+        )
+        set_backbone_trainable(model, backbone_trainable)
+        if epoch == start_epoch or epoch == args.freeze_backbone_epochs:
+            print(
+                f"Backbone {'trainable' if backbone_trainable else 'frozen'} "
+                f"at epoch {epoch + 1}"
+            )
         model.train()
-        totals = {"total": 0.0, "restoration": 0.0, "degradation": 0.0}
+        totals = {
+            "total": 0.0,
+            "restoration": 0.0,
+            "degradation": 0.0,
+            "content": 0.0,
+            "decorrelation": 0.0,
+            "gate": 0.0,
+        }
         optimizer_steps = 0
         for step, batch in enumerate(train_loader, start=1):
             optimizer.zero_grad(set_to_none=True)
             current_batch = batch["lq"].shape[0]
             microbatch_count = math.ceil(current_batch / args.microbatch_size)
-            step_values = {"total": 0.0, "restoration": 0.0, "degradation": 0.0}
+            step_values = {key: 0.0 for key in totals}
             try:
                 for begin in range(0, current_batch, args.microbatch_size):
                     end = min(current_batch, begin + args.microbatch_size)
                     lq = batch["lq"][begin:end].to(device, non_blocking=True)
                     gt = batch["gt"][begin:end].to(device, non_blocking=True)
                     labels = batch["label"][begin:end].to(device, non_blocking=True)
+                    pair_size = lq.shape[0]
+                    has_paired_view = "lq_view2" in batch
+                    if has_paired_view:
+                        lq = torch.cat(
+                            [lq, batch["lq_view2"][begin:end].to(device, non_blocking=True)]
+                        )
+                        gt = torch.cat([gt, gt], dim=0)
+                        labels = torch.cat(
+                            [
+                                labels,
+                                batch["label_view2"][begin:end].to(
+                                    device, non_blocking=True
+                                ),
+                            ]
+                        )
                     with amp_context(device, use_amp):
                         if hasattr(model, "cot_adapter"):
                             prediction, auxiliary = model(lq, return_aux=True)
@@ -449,16 +564,41 @@ def main() -> None:
                         else:
                             prediction = model(lq)
                             degradation = torch.zeros((), device=device)
+                            auxiliary = {}
                         restoration = psnr_loss(prediction, gt)
                         if args.fft_weight:
                             restoration = restoration + args.fft_weight * fft_loss(prediction, gt)
-                        loss = restoration + args.degradation_weight * degradation
+                        if has_paired_view:
+                            content = content_consistency_loss(
+                                auxiliary["content_embedding"], pair_size
+                            )
+                        else:
+                            content = torch.zeros((), device=device)
+                        if hasattr(model, "cot_adapter"):
+                            decorrelation = embedding_decorrelation_loss(
+                                auxiliary["content_embedding"],
+                                auxiliary["degradation_embedding"],
+                            )
+                            gate = auxiliary["gate_regularization"]
+                        else:
+                            decorrelation = torch.zeros((), device=device)
+                            gate = torch.zeros((), device=device)
+                        loss = (
+                            restoration
+                            + args.degradation_weight * degradation
+                            + args.content_weight * content
+                            + args.decorrelation_weight * decorrelation
+                            + args.gate_weight * gate
+                        )
                         scaled_loss = loss / microbatch_count
                     scaler.scale(scaled_loss).backward()
                     step_values["total"] += loss.detach().item() / microbatch_count
                     step_values["restoration"] += restoration.detach().item() / microbatch_count
                     step_values["degradation"] += degradation.detach().item() / microbatch_count
-                    del lq, gt, labels, prediction, loss, scaled_loss
+                    step_values["content"] += content.detach().item() / microbatch_count
+                    step_values["decorrelation"] += decorrelation.detach().item() / microbatch_count
+                    step_values["gate"] += gate.detach().item() / microbatch_count
+                    del lq, gt, labels, prediction, loss, scaled_loss, auxiliary
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 scaler.step(optimizer)
@@ -486,10 +626,16 @@ def main() -> None:
                 break
 
         scheduler.step()
-        val_psnr, val_bce = validate(model, val_loader, device, use_amp)
+        last_validation = validate(model, val_loader, device, use_amp)
+        val_psnr = last_validation["psnr"]
         averages = {key: value / max(1, optimizer_steps) for key, value in totals.items()}
         elapsed_minutes = (time.monotonic() - started_at) / 60.0
-        print(f"epoch {epoch+1:03d}: val_psnr={val_psnr:.4f} val_bce={val_bce:.4f}")
+        print(
+            f"epoch {epoch+1:03d}: val_psnr={val_psnr:.4f} "
+            f"val_bce={last_validation['bce']:.4f} "
+            f"val_f1={last_validation['degradation_micro_f1']:.4f} "
+            f"exact={last_validation['degradation_exact_match']:.4f}"
+        )
         payload = checkpoint_payload(
             model, optimizer, scheduler, scaler, epoch, max(best_psnr, val_psnr), args
         )
@@ -506,9 +652,16 @@ def main() -> None:
                     averages["total"],
                     averages["restoration"],
                     averages["degradation"],
-                    val_psnr,
-                    val_bce,
+                    averages["content"],
+                    averages["decorrelation"],
+                    averages["gate"],
+                    last_validation["psnr"],
+                    last_validation["bce"],
+                    last_validation["degradation_micro_f1"],
+                    last_validation["degradation_exact_match"],
+                    last_validation["gate_mean_abs"],
                     optimizer.param_groups[0]["lr"],
+                    optimizer.param_groups[-1]["lr"],
                     elapsed_minutes,
                 ]
             )
@@ -527,6 +680,7 @@ def main() -> None:
             "model_type": args.model,
             "preset": args.preset,
             "parameters": parameter_counts,
+            "last_validation": last_validation,
         },
     )
     print(f"Training complete. Best validation PSNR: {best_psnr:.4f} dB")
