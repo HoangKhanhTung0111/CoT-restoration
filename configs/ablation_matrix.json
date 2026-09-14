@@ -1,6 +1,6 @@
 {
   "shared": {
-    "preset": "gopro32",
+    "preset": "sidd32",
     "pretrained": "auto",
     "seed": 42,
     "crop_size": 256,

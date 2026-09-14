@@ -39,6 +39,14 @@ def parse_args() -> argparse.Namespace:
         "--data-root", default=str(KAGGLE_CDD11_ROOT)
     )
     parser.add_argument("--output-dir", default="/kaggle/working/cot_nafnet_evaluation")
+    parser.add_argument(
+        "--split",
+        choices=("validation", "test"),
+        default="validation",
+        help="Use validation while developing; reserve test for a locked final run.",
+    )
+    parser.add_argument("--val-fraction", type=float, default=0.2)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tile", type=int, default=256)
     parser.add_argument("--overlap", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -219,7 +227,8 @@ def main() -> None:
         device = torch.device("cpu")
     else:
         raise RuntimeError("CUDA is unavailable. Enable a Kaggle GPU or pass --allow-cpu.")
-    use_amp = bool(args.amp and device.type == "cuda")
+    requested_amp = bool(args.amp and device.type == "cuda")
+    use_amp = requested_amp
     checkpoint = load_torch_file(args.checkpoint)
     if not isinstance(checkpoint, dict) or "model" not in checkpoint:
         raise RuntimeError("Expected a checkpoint created by train_kaggle.py")
@@ -243,8 +252,20 @@ def main() -> None:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
+    dataset_mode = "val" if args.split == "validation" else "test"
+    if args.split == "test":
+        print(
+            "WARNING: evaluating the held-out test split. Do not use this run "
+            "for model selection or tuning.",
+            flush=True,
+        )
     dataset = CDD11Dataset(
-        find_cdd11_root(args.data_root), mode="test", crop_size=0, augment=False
+        find_cdd11_root(args.data_root),
+        mode=dataset_mode,
+        crop_size=0,
+        val_fraction=args.val_fraction,
+        split_seed=args.seed,
+        augment=False,
     )
     loader = DataLoader(
         dataset,
@@ -258,8 +279,9 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: List[Dict[str, object]] = []
-    grouped: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    grouped: Dict[str, List[Tuple[float, float, float, float]]] = defaultdict(list)
     true_positive = false_positive = false_negative = exact_match = 0
+    fp32_fallback = False
 
     for index, batch in enumerate(loader, start=1):
         lq_cpu, gt_cpu = batch["lq"].float(), batch["gt"].float()
@@ -269,6 +291,25 @@ def main() -> None:
         prediction, auxiliary = tiled_inference(
             model, lq_cpu, device, args.tile, args.overlap, use_amp
         )
+        if not torch.isfinite(prediction).all() and use_amp:
+            print(
+                "WARNING: non-finite AMP output; retrying this and subsequent "
+                "samples in FP32.",
+                flush=True,
+            )
+            use_amp = False
+            fp32_fallback = True
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            started = time.perf_counter()
+            prediction, auxiliary = tiled_inference(
+                model, lq_cpu, device, args.tile, args.overlap, False
+            )
+        if not torch.isfinite(prediction).all():
+            raise FloatingPointError(
+                f"Non-finite output for {batch['degradation_type'][0]}/"
+                f"{batch['scene_id'][0]} even in FP32"
+            )
         prediction = prediction.clamp(0, 1)
         if device.type == "cuda":
             torch.cuda.synchronize()
@@ -278,13 +319,24 @@ def main() -> None:
         psnr = calculate_psnr(prediction, gt_cpu)
         ssim = calculate_ssim(prediction, gt_cpu)
         input_psnr = calculate_psnr(lq_cpu, gt_cpu)
-        grouped[degradation_type].append((psnr, ssim))
+        input_ssim = calculate_ssim(lq_cpu, gt_cpu)
+        metric_values = (input_psnr, input_ssim, psnr, ssim)
+        if not all(math.isfinite(value) for value in metric_values):
+            raise FloatingPointError(
+                f"Non-finite metric for {degradation_type}/{scene_id}: "
+                f"{metric_values}"
+            )
+        grouped[degradation_type].append(metric_values)
         row: Dict[str, object] = {
+            "split": args.split,
             "type": degradation_type,
             "scene_id": scene_id,
+            "input_psnr": input_psnr,
+            "input_ssim": input_ssim,
             "psnr": psnr,
             "ssim": ssim,
-            "input_psnr": input_psnr,
+            "delta_psnr": psnr - input_psnr,
+            "delta_ssim": ssim - input_ssim,
             "latency_ms": latency_ms,
         }
         if "degradation_logits" in auxiliary:
@@ -310,23 +362,42 @@ def main() -> None:
 
     per_type = {
         degradation_type: {
-            "psnr": float(np.mean([item[0] for item in values])),
-            "ssim": float(np.mean([item[1] for item in values])),
+            "input_psnr": float(np.mean([item[0] for item in values])),
+            "input_ssim": float(np.mean([item[1] for item in values])),
+            "psnr": float(np.mean([item[2] for item in values])),
+            "ssim": float(np.mean([item[3] for item in values])),
             "count": len(values),
         }
         for degradation_type, values in sorted(grouped.items())
     }
     macro_psnr = float(np.mean([value["psnr"] for value in per_type.values()]))
     macro_ssim = float(np.mean([value["ssim"] for value in per_type.values()]))
+    macro_input_psnr = float(
+        np.mean([value["input_psnr"] for value in per_type.values()])
+    )
+    macro_input_ssim = float(
+        np.mean([value["input_ssim"] for value in per_type.values()])
+    )
     f1_denominator = 2 * true_positive + false_positive + false_negative
     summary = {
         "model_type": model_type,
         "preset": preset,
+        "split": args.split,
+        "scene_ids": list(dataset.scene_ids),
+        "val_fraction": args.val_fraction if args.split == "validation" else None,
+        "split_seed": args.seed if args.split == "validation" else None,
         "use_skip_gates": use_skip_gates,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "samples": len(rows),
+        "amp_requested": requested_amp,
+        "amp_used": use_amp,
+        "fp32_fallback": fp32_fallback,
+        "macro_input_psnr": macro_input_psnr,
+        "macro_input_ssim": macro_input_ssim,
         "macro_psnr": macro_psnr,
         "macro_ssim": macro_ssim,
+        "macro_delta_psnr": macro_psnr - macro_input_psnr,
+        "macro_delta_ssim": macro_ssim - macro_input_ssim,
         "degradation_micro_f1": (
             2 * true_positive / f1_denominator if f1_denominator else None
         ),

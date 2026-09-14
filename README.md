@@ -44,7 +44,7 @@ the selected validation preset.
 
 ## Research training controls
 
-The default `gopro32` hybrid run uses the matching official pretrained model,
+The default `sidd32` hybrid run uses the validation-selected official pretrained model,
 paired degradation views of the same crop, multi-label degradation supervision,
 content consistency, content/degradation decorrelation, skip gating, and a
 three-epoch adapter warm-up with the backbone frozen.

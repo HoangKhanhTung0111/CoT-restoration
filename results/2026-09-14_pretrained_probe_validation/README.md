@@ -17,3 +17,12 @@ used.
 model on both metrics, is much smaller than `sidd64`, and does not require the
 GoPro checkpoints' FP32 fallback. This is an initialization probe, not a
 fine-tuned CDD-11 baseline.
+
+## Qualitative check
+
+One `Input | Restored | Ground truth` sheet was reviewed for each of the 11
+degradation types using scene `00059`. SIDD32 mostly smooths fine noise, makes
+only a small change to some rain streaks, and does not materially remove haze
+or snow or correct low illumination. The output remains far from the target.
+This agrees with the near-zero aggregate PSNR delta and confirms task/domain
+mismatch rather than a tensor-loading failure. Fine-tuning on CDD-11 is needed.

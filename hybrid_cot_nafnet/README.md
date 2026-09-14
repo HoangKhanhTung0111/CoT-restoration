@@ -89,15 +89,19 @@ python -m hybrid_cot_nafnet.train_kaggle \
   --patches-per-image 2 --num-workers 2
 ```
 
-Evaluate the best checkpoint. Only one tile is held on the GPU at a time:
+Evaluate the best checkpoint on validation while developing. Only one tile is
+held on the GPU at a time:
 
 ```bash
 python -m hybrid_cot_nafnet.evaluate \
   --checkpoint /kaggle/working/cot_nafnet_output/best.pt \
   --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
   --output-dir /kaggle/working/cot_nafnet_evaluation \
+  --split validation \
   --tile 256 --overlap 32 --num-workers 2
 ```
+
+Use `--split test` only after the experiment configuration is locked.
 
 Aggregate completed baseline/hybrid runs into one comparison table:
 
