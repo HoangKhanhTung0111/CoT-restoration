@@ -86,7 +86,7 @@ python -m hybrid_cot_nafnet.train_kaggle \
   --model hybrid --preset gopro32 --pretrained auto \
   --epochs 100 --max-minutes 0 \
   --crop-size 256 --batch-size 4 --microbatch-size 2 --multi-gpu \
-  --patches-per-image 2 --num-workers 2
+  --patches-per-image 2 --num-workers 0
 ```
 
 Evaluate the best checkpoint on validation while developing. Only one tile is

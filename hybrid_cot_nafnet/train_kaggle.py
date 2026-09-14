@@ -80,7 +80,12 @@ def parse_args() -> argparse.Namespace:
         help="Peak activation memory follows this value; gradients are accumulated.",
     )
     parser.add_argument("--patches-per-image", type=int, default=2)
-    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="CDD-11-30 is small; zero avoids worker forks retaining model memory.",
+    )
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-3)
     parser.add_argument("--fft-weight", type=float, default=0.05)
@@ -103,7 +108,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--log-every", type=int, default=25)
-    parser.add_argument("--save-every", type=int, default=5)
+    parser.add_argument(
+        "--save-every",
+        type=int,
+        default=0,
+        help="Save full periodic resume checkpoints every N epochs; zero disables them.",
+    )
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-cpu", action="store_true")
     return parser.parse_args()
@@ -236,7 +246,7 @@ def make_loader(dataset, batch_size: int, workers: int, sampler=None, shuffle=Fa
         drop_last=False,
     )
     if workers > 0:
-        kwargs.update(persistent_workers=True, prefetch_factor=2)
+        kwargs.update(persistent_workers=False, prefetch_factor=2)
     return DataLoader(**kwargs)
 
 
@@ -244,7 +254,8 @@ def make_loader(dataset, batch_size: int, workers: int, sampler=None, shuffle=Fa
 def validate(
     model: nn.Module, loader: DataLoader, device: torch.device, use_amp: bool
 ) -> Dict[str, float]:
-    model.eval()
+    validation_model = unwrap_model(model)
+    validation_model.eval()
     psnr_sum = 0.0
     bce_sum = 0.0
     sample_count = 0
@@ -256,8 +267,8 @@ def validate(
         gt = batch["gt"].to(device, non_blocking=True)
         labels = batch["label"].to(device, non_blocking=True)
         with amp_context(device, use_amp):
-            if has_cot_adapter(model):
-                prediction, auxiliary = model(lq, return_aux=True)
+            if has_cot_adapter(validation_model):
+                prediction, auxiliary = validation_model(lq, return_aux=True)
                 bce = F.binary_cross_entropy_with_logits(
                     auxiliary["degradation_logits"].float(), labels.float()
                 )
@@ -270,7 +281,7 @@ def validate(
                 label_count += labels.numel()
                 gate_sum += auxiliary["gate_mean_abs"].float().mean().item() * lq.shape[0]
             else:
-                prediction, bce = model(lq), torch.zeros((), device=device)
+                prediction, bce = validation_model(lq), torch.zeros((), device=device)
         mse = (prediction.clamp(0, 1).float() - gt.float()).square().mean(dim=(1, 2, 3))
         psnr_sum += (-10.0 * torch.log10(mse + 1e-8)).sum().item()
         bce_sum += bce.item() * lq.shape[0]
@@ -301,6 +312,21 @@ def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, ar
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
         "scaler": scaler.state_dict(),
+        "epoch": epoch,
+        "best_psnr": best_psnr,
+        "model_type": args.model,
+        "preset": args.preset,
+        "adapter_hidden": args.adapter_hidden,
+        "use_skip_gates": args.skip_gates,
+        "args": vars(args),
+    }
+
+
+def model_only_checkpoint_payload(model, epoch, best_psnr, args):
+    """Small evaluation checkpoint; use `last.pt` when optimizer resume is needed."""
+    return {
+        "format_version": 2,
+        "model": unwrap_model(model).state_dict(),
         "epoch": epoch,
         "best_psnr": best_psnr,
         "model_type": args.model,
@@ -345,6 +371,8 @@ def main() -> None:
         args.microbatch_size = args.batch_size
     if args.freeze_backbone_epochs < 0:
         raise ValueError("freeze-backbone-epochs must be non-negative")
+    if args.num_workers < 0 or args.save_every < 0:
+        raise ValueError("num-workers and save-every must be non-negative")
     if not 0.0 < args.backbone_lr_scale <= 1.0:
         raise ValueError("backbone-lr-scale must be in (0, 1]")
     if args.crop_size % 16:
@@ -682,6 +710,13 @@ def main() -> None:
                 break
 
         scheduler.step()
+        optimizer.zero_grad(set_to_none=True)
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        print(
+            f"epoch {epoch+1:03d}: training pass complete; starting validation",
+            flush=True,
+        )
         last_validation = validate(model, val_loader, device, use_amp)
         val_psnr = last_validation["psnr"]
         averages = {key: value / max(1, optimizer_steps) for key, value in totals.items()}
@@ -698,9 +733,13 @@ def main() -> None:
         atomic_save(payload, output_dir / "last.pt")
         if val_psnr > best_psnr:
             best_psnr = val_psnr
-            atomic_save(payload, output_dir / "best.pt")
-        if (epoch + 1) % args.save_every == 0:
+            atomic_save(
+                model_only_checkpoint_payload(model, epoch, best_psnr, args),
+                output_dir / "best.pt",
+            )
+        if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
             atomic_save(payload, output_dir / f"epoch_{epoch+1:03d}.pt")
+        del payload
         with log_path.open("a", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(
                 [
