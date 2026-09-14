@@ -82,6 +82,7 @@ When assigned tasks, follow these step-by-step instructions:
 * **No Unnecessary Dependencies:** Rely on standard packages available on Kaggle (`torch`, `torchvision`, `einops`, `timm`, `opencv-python`).
 * **Modular Code:** Keep custom modules strictly isolated inside `hybrid_cot_nafnet/` to avoid corrupting working baseline code in `nafnet/`.
 * **Data Safety:** Split CDD-11 by clean scene ID, verify every degraded/clean pair, and reject overlap between train, validation, and test IDs.
+* **Selection Safety:** Select pretrained initialization and tune hyperparameters only on the scene-disjoint validation split. Reserve `CDD-11_test` for final evaluation after the configuration is locked.
 * **Clear Documentation:** Add concise docstrings explaining mathematical operations inside new PyTorch modules.
 * **Math & Formula Clarification:** If any formula or mathematical notation in `docs/` appears corrupted/unclear due to PDF-to-Markdown conversion artifacts (e.g., unexpected `##` or broken LaTeX symbols), DO NOT guess the implementation. Ask the user for clarification or refer directly to the source code definitions in `cotir/` or `nafnet/`.
 

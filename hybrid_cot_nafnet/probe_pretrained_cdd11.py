@@ -1,4 +1,4 @@
-"""Measure all four official NAFNet checkpoints zero-shot on CDD-11-30."""
+"""Measure official NAFNet checkpoints zero-shot on a CDD-11-30 split."""
 
 from __future__ import annotations
 
@@ -32,8 +32,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default=str(KAGGLE_CDD11_ROOT))
     parser.add_argument("--pretrained-root", default=str(KAGGLE_PRETRAINED_ROOT))
     parser.add_argument(
-        "--output-dir", default="/kaggle/working/pretrained_cdd11_probe"
+        "--output-dir",
+        default="/kaggle/working/pretrained_cdd11_validation_probe",
     )
+    parser.add_argument(
+        "--split",
+        choices=("validation", "test"),
+        default="validation",
+        help="Use validation for model selection; reserve test for final reporting.",
+    )
+    parser.add_argument("--val-fraction", type=float, default=0.2)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--presets",
         nargs="+",
@@ -61,8 +70,20 @@ def main() -> None:
         raise RuntimeError("Enable a Kaggle GPU or pass --allow-cpu for diagnostics")
     use_amp = bool(args.amp and device.type == "cuda")
 
+    dataset_mode = "val" if args.split == "validation" else "test"
+    if args.split == "test":
+        print(
+            "WARNING: probing the held-out test split. Do not use these metrics "
+            "to select a checkpoint or tune hyperparameters.",
+            flush=True,
+        )
     dataset = CDD11Dataset(
-        find_cdd11_root(args.data_root), mode="test", crop_size=0, augment=False
+        find_cdd11_root(args.data_root),
+        mode=dataset_mode,
+        crop_size=0,
+        val_fraction=args.val_fraction,
+        split_seed=args.seed,
+        augment=False,
     )
     loader = DataLoader(
         dataset,
@@ -86,7 +107,7 @@ def main() -> None:
         if device.type == "cuda":
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
-        grouped: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+        grouped: Dict[str, List[Tuple[float, float, float, float]]] = defaultdict(list)
         latencies: List[float] = []
         seen = 0
         preset_use_amp = use_amp
@@ -124,22 +145,30 @@ def main() -> None:
             latency_ms = (time.perf_counter() - started) * 1000.0
             prediction = prediction.clamp(0, 1)
             degradation_type = batch["degradation_type"][0]
+            input_psnr = calculate_psnr(lq, gt)
+            input_ssim = calculate_ssim(lq, gt)
             psnr = calculate_psnr(prediction, gt)
             ssim = calculate_ssim(prediction, gt)
-            if not math.isfinite(psnr) or not math.isfinite(ssim):
+            metrics = (input_psnr, input_ssim, psnr, ssim)
+            if not all(math.isfinite(value) for value in metrics):
                 raise FloatingPointError(
                     f"Non-finite metric for {preset}/{degradation_type}/"
-                    f"{batch['scene_id'][0]}: PSNR={psnr}, SSIM={ssim}"
+                    f"{batch['scene_id'][0]}: {metrics}"
                 )
-            grouped[degradation_type].append((psnr, ssim))
+            grouped[degradation_type].append(metrics)
             latencies.append(latency_ms)
             rows.append(
                 {
+                    "split": args.split,
                     "preset": preset,
                     "type": degradation_type,
                     "scene_id": batch["scene_id"][0],
+                    "input_psnr": input_psnr,
+                    "input_ssim": input_ssim,
                     "psnr": psnr,
                     "ssim": ssim,
+                    "delta_psnr": psnr - input_psnr,
+                    "delta_ssim": ssim - input_ssim,
                     "latency_ms": latency_ms,
                 }
             )
@@ -151,13 +180,27 @@ def main() -> None:
             )
         per_type = {
             name: {
-                "psnr": float(np.mean([value[0] for value in values])),
-                "ssim": float(np.mean([value[1] for value in values])),
+                "input_psnr": float(np.mean([value[0] for value in values])),
+                "input_ssim": float(np.mean([value[1] for value in values])),
+                "psnr": float(np.mean([value[2] for value in values])),
+                "ssim": float(np.mean([value[3] for value in values])),
                 "count": len(values),
             }
             for name, values in sorted(grouped.items())
         }
+        macro_input_psnr = float(
+            np.mean([value["input_psnr"] for value in per_type.values()])
+        )
+        macro_input_ssim = float(
+            np.mean([value["input_ssim"] for value in per_type.values()])
+        )
+        macro_psnr = float(np.mean([value["psnr"] for value in per_type.values()]))
+        macro_ssim = float(np.mean([value["ssim"] for value in per_type.values()]))
         summaries[preset] = {
+            "split": args.split,
+            "scene_ids": list(dataset.scene_ids),
+            "val_fraction": args.val_fraction if args.split == "validation" else None,
+            "split_seed": args.seed if args.split == "validation" else None,
             "checkpoint": str(checkpoint_path),
             "load_report": load_report,
             "parameters": count_parameters(model),
@@ -165,8 +208,12 @@ def main() -> None:
             "amp_requested": use_amp,
             "amp_used": preset_use_amp,
             "fp32_fallback": fp32_fallback,
-            "macro_psnr": float(np.mean([value["psnr"] for value in per_type.values()])),
-            "macro_ssim": float(np.mean([value["ssim"] for value in per_type.values()])),
+            "macro_input_psnr": macro_input_psnr,
+            "macro_input_ssim": macro_input_ssim,
+            "macro_psnr": macro_psnr,
+            "macro_ssim": macro_ssim,
+            "macro_delta_psnr": macro_psnr - macro_input_psnr,
+            "macro_delta_ssim": macro_ssim - macro_input_ssim,
             "mean_latency_ms": float(np.mean(latencies)),
             "peak_gpu_memory_mb": (
                 torch.cuda.max_memory_allocated() / 1024**2

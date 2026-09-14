@@ -23,6 +23,8 @@ alwaysApply: true
   Use it for pipeline validation and preliminary ablation, and label results as
   subset results. Recommend the full CDD-11 before publication-level claims.
 - Split by clean scene ID and reject train/validation/test scene overlap.
+- Select pretrained initialization and tune hyperparameters on validation only.
+  Keep `CDD-11_test` held out until the experiment configuration is locked.
 - Every training run must save config, environment, Git commit, dataset
   manifest, pretrained loading report, epoch log, summary, and checkpoints.
 - `notebook/nafnet.ipynb` benchmarks four pretrained models on partial GoPro and

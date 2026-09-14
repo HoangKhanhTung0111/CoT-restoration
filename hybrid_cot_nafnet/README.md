@@ -48,11 +48,16 @@ Audit all pairs and all four pretrained checkpoints before training:
 python -m hybrid_cot_nafnet.audit_kaggle
 ```
 
-Optionally measure the four pretrained models zero-shot on the CDD-11 subset:
+Optionally measure the four pretrained models zero-shot on the scene-disjoint
+CDD-11 validation split (the default and the only split used for selection):
 
 ```bash
 python -m hybrid_cot_nafnet.probe_pretrained_cdd11
 ```
+
+The report includes input PSNR/SSIM and output-minus-input deltas. Use
+`--split test` only for a final locked evaluation, never to choose the
+pretrained initialization or tune hyperparameters.
 
 First run one epoch using the 17M GoPro-width32 initialization:
 

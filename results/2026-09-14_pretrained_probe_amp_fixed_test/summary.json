@@ -1,0 +1,166 @@
+{
+  "gopro32": {
+    "checkpoint": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-GoPro-width32.pth",
+    "load_report": {
+      "loaded": 664,
+      "available": 664,
+      "backbone_loaded": 664,
+      "backbone_available": 664,
+      "backbone_missing": 0,
+      "unexpected": 0,
+      "mismatched": 0
+    },
+    "parameters": {
+      "total": 17111907,
+      "adapter": 0,
+      "backbone": 17111907
+    },
+    "samples": 55,
+    "amp_requested": true,
+    "amp_used": false,
+    "fp32_fallback": true,
+    "macro_psnr": 7.035728941251071,
+    "macro_ssim": 0.17023135505785997,
+    "mean_latency_ms": 736.0517627272635,
+    "peak_gpu_memory_mb": 163.08740234375,
+    "per_type": {
+      "haze": {
+        "psnr": 7.504903909985641,
+        "ssim": 0.2604532424360514,
+        "count": 5
+      },
+      "haze_rain": {
+        "psnr": 6.595749765451147,
+        "ssim": 0.1529366822913289,
+        "count": 5
+      },
+      "haze_snow": {
+        "psnr": 7.930450655480357,
+        "ssim": 0.28551657497882843,
+        "count": 5
+      },
+      "low": {
+        "psnr": 5.533638549454676,
+        "ssim": 0.051180972903966906,
+        "count": 5
+      },
+      "low_haze": {
+        "psnr": 9.437709589244363,
+        "ssim": 0.3307584375143051,
+        "count": 5
+      },
+      "low_haze_rain": {
+        "psnr": 6.669590118492229,
+        "ssim": 0.1110766427591443,
+        "count": 5
+      },
+      "low_haze_snow": {
+        "psnr": 8.108204563645032,
+        "ssim": 0.20888741314411163,
+        "count": 5
+      },
+      "low_rain": {
+        "psnr": 5.1299141208356165,
+        "ssim": 0.010291265323758125,
+        "count": 5
+      },
+      "low_snow": {
+        "psnr": 6.672230394561249,
+        "ssim": 0.09044156512245535,
+        "count": 5
+      },
+      "rain": {
+        "psnr": 6.7218061015435975,
+        "ssim": 0.14842239040881394,
+        "count": 5
+      },
+      "snow": {
+        "psnr": 7.088820585067859,
+        "ssim": 0.22257971875369548,
+        "count": 5
+      }
+    }
+  },
+  "gopro64": {
+    "checkpoint": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-GoPro-width64.pth",
+    "load_report": {
+      "loaded": 664,
+      "available": 664,
+      "backbone_loaded": 664,
+      "backbone_available": 664,
+      "backbone_missing": 0,
+      "unexpected": 0,
+      "mismatched": 0
+    },
+    "parameters": {
+      "total": 67888835,
+      "adapter": 0,
+      "backbone": 67888835
+    },
+    "samples": 55,
+    "amp_requested": true,
+    "amp_used": false,
+    "fp32_fallback": true,
+    "macro_psnr": 8.752644500551007,
+    "macro_ssim": 0.3032816191923551,
+    "mean_latency_ms": 1453.5496676363687,
+    "peak_gpu_memory_mb": 516.75537109375,
+    "per_type": {
+      "haze": {
+        "psnr": 11.807615589762252,
+        "ssim": 0.623882257938385,
+        "count": 5
+      },
+      "haze_rain": {
+        "psnr": 11.23551502879187,
+        "ssim": 0.5206173956394196,
+        "count": 5
+      },
+      "haze_snow": {
+        "psnr": 10.86465072532631,
+        "ssim": 0.5553730577230453,
+        "count": 5
+      },
+      "low": {
+        "psnr": 4.770705567881233,
+        "ssim": 0.004189354972913862,
+        "count": 5
+      },
+      "low_haze": {
+        "psnr": 5.988792823380068,
+        "ssim": 0.10697549153119326,
+        "count": 5
+      },
+      "low_haze_rain": {
+        "psnr": 5.799672823941552,
+        "ssim": 0.08542699161916971,
+        "count": 5
+      },
+      "low_haze_snow": {
+        "psnr": 5.365292287217171,
+        "ssim": 0.05457811062224209,
+        "count": 5
+      },
+      "low_rain": {
+        "psnr": 4.779586901907573,
+        "ssim": 0.004464740911498666,
+        "count": 5
+      },
+      "low_snow": {
+        "psnr": 4.85355701248653,
+        "ssim": 0.009826655313372613,
+        "count": 5
+      },
+      "rain": {
+        "psnr": 15.958976022003402,
+        "ssim": 0.6551840364933014,
+        "count": 5
+      },
+      "snow": {
+        "psnr": 14.854724723363123,
+        "ssim": 0.7155797183513641,
+        "count": 5
+      }
+    }
+  }
+}

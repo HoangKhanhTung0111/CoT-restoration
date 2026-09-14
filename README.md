@@ -30,9 +30,10 @@ read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
 
 An optional `RUN_PRETRAINED_PROBE` switch evaluates all four official NAFNet
-checkpoints zero-shot on the CDD-11 subset and saves a separate JSON/CSV report.
-This measurement is used to inform initialization; it is not a trained CDD-11
-baseline.
+checkpoints zero-shot on the five-scene validation split and saves a separate
+JSON/CSV report. It also records the unrestored input metrics and metric deltas.
+This validation measurement can inform initialization; it is not a trained
+CDD-11 baseline. The held-out test split is reserved for final reporting.
 
 The probe rejects non-finite outputs. If a checkpoint overflows under AMP, it
 records the fallback and retries that preset in FP32 instead of writing `NaN`
