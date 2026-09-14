@@ -28,10 +28,18 @@ class LayerNorm2d(nn.Module):
         self.eps = eps
 
     def forward(self, x: Tensor) -> Tensor:
-        mean = x.mean(dim=1, keepdim=True)
-        variance = (x - mean).square().mean(dim=1, keepdim=True)
-        normalized = (x - mean) * torch.rsqrt(variance + self.eps)
-        return normalized * self.weight[None, :, None, None] + self.bias[None, :, None, None]
+        # Deep GoPro checkpoints can overflow when variance is accumulated in
+        # FP16. Keep normalization statistics in FP32 and cast back afterwards.
+        input_dtype = x.dtype
+        x_float = x.float()
+        mean = x_float.mean(dim=1, keepdim=True)
+        variance = (x_float - mean).square().mean(dim=1, keepdim=True)
+        normalized = (x_float - mean) * torch.rsqrt(variance + self.eps)
+        output = (
+            normalized * self.weight.float()[None, :, None, None]
+            + self.bias.float()[None, :, None, None]
+        )
+        return output.to(input_dtype)
 
 
 class SimpleGate(nn.Module):

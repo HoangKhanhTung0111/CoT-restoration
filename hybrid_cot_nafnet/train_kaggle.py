@@ -357,7 +357,8 @@ def main() -> None:
         device = torch.device("cpu")
     else:
         raise RuntimeError("CUDA is unavailable. Enable a Kaggle GPU or pass --allow-cpu for testing.")
-    use_amp = bool(args.amp and device.type == "cuda")
+    requested_amp = bool(args.amp)
+    use_amp = bool(requested_amp and device.type == "cuda")
     if hasattr(torch, "set_float32_matmul_precision"):
         torch.set_float32_matmul_precision("high")
 
@@ -515,8 +516,31 @@ def main() -> None:
     sample = train_set[0]["lq"][None].to(device)
     with torch.no_grad(), amp_context(device, use_amp):
         probe = model(sample)
+    if not torch.isfinite(probe).all() and use_amp:
+        print(
+            "WARNING: pretrained model produced non-finite output with AMP; "
+            "falling back to FP32 for this run."
+        )
+        use_amp = False
+        args.amp = False
+        scaler = make_grad_scaler(False)
+        with torch.no_grad(), amp_context(device, False):
+            probe = model(sample)
     if probe.shape != sample.shape or not torch.isfinite(probe).all():
-        raise RuntimeError(f"Preflight failed: input={sample.shape}, output={probe.shape}")
+        raise RuntimeError(
+            f"Preflight failed even after numerical fallback: "
+            f"input={sample.shape}, output={probe.shape}, "
+            f"finite={bool(torch.isfinite(probe).all())}"
+        )
+    _write_json(
+        output_dir / "runtime_resolution.json",
+        {
+            "amp_requested": requested_amp,
+            "amp_used": use_amp,
+            "multi_gpu": isinstance(model, nn.DataParallel),
+            "visible_cuda_devices": gpu_ids,
+        },
+    )
     del sample, probe
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -713,6 +737,8 @@ def main() -> None:
             "preset": args.preset,
             "parameters": parameter_counts,
             "last_validation": last_validation,
+            "amp_requested": requested_amp,
+            "amp_used": use_amp,
             "multi_gpu": isinstance(model, nn.DataParallel),
             "gpu_peak_memory_mb": (
                 {

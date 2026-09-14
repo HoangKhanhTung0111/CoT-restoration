@@ -1,0 +1,318 @@
+{
+  "gopro32": {
+    "checkpoint": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-GoPro-width32.pth",
+    "load_report": {
+      "loaded": 664,
+      "available": 664,
+      "backbone_loaded": 664,
+      "backbone_available": 664,
+      "backbone_missing": 0,
+      "unexpected": 0,
+      "mismatched": 0
+    },
+    "parameters": {
+      "total": 17111907,
+      "adapter": 0,
+      "backbone": 17111907
+    },
+    "samples": 55,
+    "macro_psnr": NaN,
+    "macro_ssim": NaN,
+    "mean_latency_ms": 844.4280899636562,
+    "peak_gpu_memory_mb": 163.08740234375,
+    "per_type": {
+      "haze": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "haze_rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "haze_snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_haze": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_haze_rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_haze_snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      }
+    }
+  },
+  "gopro64": {
+    "checkpoint": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-GoPro-width64.pth",
+    "load_report": {
+      "loaded": 664,
+      "available": 664,
+      "backbone_loaded": 664,
+      "backbone_available": 664,
+      "backbone_missing": 0,
+      "unexpected": 0,
+      "mismatched": 0
+    },
+    "parameters": {
+      "total": 67888835,
+      "adapter": 0,
+      "backbone": 67888835
+    },
+    "samples": 55,
+    "macro_psnr": NaN,
+    "macro_ssim": NaN,
+    "mean_latency_ms": 916.9160409272827,
+    "peak_gpu_memory_mb": 516.75537109375,
+    "per_type": {
+      "haze": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "haze_rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "haze_snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_haze": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_haze_rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_haze_snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "low_snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "rain": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      },
+      "snow": {
+        "psnr": NaN,
+        "ssim": NaN,
+        "count": 5
+      }
+    }
+  },
+  "sidd32": {
+    "checkpoint": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-SIDD-width32.pth",
+    "load_report": {
+      "loaded": 664,
+      "available": 664,
+      "backbone_loaded": 664,
+      "backbone_available": 664,
+      "backbone_missing": 0,
+      "unexpected": 0,
+      "mismatched": 0
+    },
+    "parameters": {
+      "total": 29159715,
+      "adapter": 0,
+      "backbone": 29159715
+    },
+    "samples": 55,
+    "macro_psnr": 14.840634539128528,
+    "macro_ssim": 0.5524954584511844,
+    "mean_latency_ms": 827.8448627636407,
+    "peak_gpu_memory_mb": 240.0341796875,
+    "per_type": {
+      "haze": {
+        "psnr": 14.93982384743239,
+        "ssim": 0.6216472685337067,
+        "count": 5
+      },
+      "haze_rain": {
+        "psnr": 13.58677780396835,
+        "ssim": 0.5747882187366485,
+        "count": 5
+      },
+      "haze_snow": {
+        "psnr": 12.93623288563866,
+        "ssim": 0.5418066501617431,
+        "count": 5
+      },
+      "low": {
+        "psnr": 12.541053274463431,
+        "ssim": 0.4935877203941345,
+        "count": 5
+      },
+      "low_haze": {
+        "psnr": 13.556049191504432,
+        "ssim": 0.4727885007858276,
+        "count": 5
+      },
+      "low_haze_rain": {
+        "psnr": 13.825665823034026,
+        "ssim": 0.45906264781951905,
+        "count": 5
+      },
+      "low_haze_snow": {
+        "psnr": 12.80031448099202,
+        "ssim": 0.4285815477371216,
+        "count": 5
+      },
+      "low_rain": {
+        "psnr": 15.23606231149069,
+        "ssim": 0.49706864953041074,
+        "count": 5
+      },
+      "low_snow": {
+        "psnr": 12.884042930875827,
+        "ssim": 0.4479734778404236,
+        "count": 5
+      },
+      "rain": {
+        "psnr": 20.272307645173566,
+        "ssim": 0.7719708323478699,
+        "count": 5
+      },
+      "snow": {
+        "psnr": 20.668649735840415,
+        "ssim": 0.7681745290756226,
+        "count": 5
+      }
+    }
+  },
+  "sidd64": {
+    "checkpoint": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-SIDD-width64.pth",
+    "load_report": {
+      "loaded": 664,
+      "available": 664,
+      "backbone_loaded": 664,
+      "backbone_available": 664,
+      "backbone_missing": 0,
+      "unexpected": 0,
+      "mismatched": 0
+    },
+    "parameters": {
+      "total": 115982915,
+      "adapter": 0,
+      "backbone": 115982915
+    },
+    "samples": 55,
+    "macro_psnr": 14.360578937643492,
+    "macro_ssim": 0.522383032061837,
+    "mean_latency_ms": 1190.5330485090913,
+    "peak_gpu_memory_mb": 807.92822265625,
+    "per_type": {
+      "haze": {
+        "psnr": 14.246281325413301,
+        "ssim": 0.5794475197792053,
+        "count": 5
+      },
+      "haze_rain": {
+        "psnr": 11.747024878653438,
+        "ssim": 0.4780204832553864,
+        "count": 5
+      },
+      "haze_snow": {
+        "psnr": 12.545947048854561,
+        "ssim": 0.5104120910167694,
+        "count": 5
+      },
+      "low": {
+        "psnr": 12.66604656881984,
+        "ssim": 0.46676498651504517,
+        "count": 5
+      },
+      "low_haze": {
+        "psnr": 13.561478661956182,
+        "ssim": 0.45217007398605347,
+        "count": 5
+      },
+      "low_haze_rain": {
+        "psnr": 13.84108797601437,
+        "ssim": 0.45680662989616394,
+        "count": 5
+      },
+      "low_haze_snow": {
+        "psnr": 12.820514257281241,
+        "ssim": 0.4272288024425507,
+        "count": 5
+      },
+      "low_rain": {
+        "psnr": 15.040438014847604,
+        "ssim": 0.48270663619041443,
+        "count": 5
+      },
+      "low_snow": {
+        "psnr": 13.031491557171373,
+        "ssim": 0.4310111105442047,
+        "count": 5
+      },
+      "rain": {
+        "psnr": 18.410973224423735,
+        "ssim": 0.7184137105941772,
+        "count": 5
+      },
+      "snow": {
+        "psnr": 20.055084800642774,
+        "ssim": 0.7432313084602356,
+        "count": 5
+      }
+    }
+  }
+}

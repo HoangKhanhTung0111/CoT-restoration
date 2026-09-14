@@ -26,9 +26,17 @@ class LayerNorm2d(nn.Module):
         self.eps = eps
 
     def forward(self, x: Tensor) -> Tensor:
-        mean = x.mean(dim=1, keepdim=True)
-        variance = (x - mean).square().mean(dim=1, keepdim=True)
-        return (x - mean) * torch.rsqrt(variance + self.eps) * self.weight + self.bias
+        input_dtype = x.dtype
+        x_float = x.float()
+        mean = x_float.mean(dim=1, keepdim=True)
+        variance = (x_float - mean).square().mean(dim=1, keepdim=True)
+        output = (
+            (x_float - mean)
+            * torch.rsqrt(variance + self.eps)
+            * self.weight.float()
+            + self.bias.float()
+        )
+        return output.to(input_dtype)
 
 
 class GatedCoTAdapter(nn.Module):

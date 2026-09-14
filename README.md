@@ -34,6 +34,10 @@ checkpoints zero-shot on the CDD-11 subset and saves a separate JSON/CSV report.
 This measurement is used to inform initialization; it is not a trained CDD-11
 baseline.
 
+The probe rejects non-finite outputs. If a checkpoint overflows under AMP, it
+records the fallback and retries that preset in FP32 instead of writing `NaN`
+scores. Training performs the same finite-output preflight before epoch one.
+
 ## Research training controls
 
 The default `gopro32` hybrid run uses the matching official pretrained model,

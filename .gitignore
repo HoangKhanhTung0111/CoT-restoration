@@ -12,6 +12,7 @@
 *.pth
 /experiments/
 /outputs/
+/22h05_14_09_2026_cdd11_probe/
 
 # Notebook/editor caches
 .ipynb_checkpoints/

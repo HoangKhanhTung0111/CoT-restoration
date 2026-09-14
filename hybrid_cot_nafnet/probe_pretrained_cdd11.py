@@ -6,6 +6,7 @@ import argparse
 import csv
 import gc
 import json
+import math
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -88,6 +89,8 @@ def main() -> None:
         grouped: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
         latencies: List[float] = []
         seen = 0
+        preset_use_amp = use_amp
+        fp32_fallback = False
         for batch in loader:
             if args.max_samples > 0 and seen >= args.max_samples:
                 break
@@ -96,8 +99,26 @@ def main() -> None:
                 torch.cuda.synchronize()
             started = time.perf_counter()
             prediction, _ = tiled_inference(
-                model, lq, device, args.tile, args.overlap, use_amp
+                model, lq, device, args.tile, args.overlap, preset_use_amp
             )
+            if not torch.isfinite(prediction).all() and preset_use_amp:
+                print(
+                    f"WARNING: {preset} produced non-finite output with AMP; "
+                    "retrying this and subsequent samples in FP32.",
+                    flush=True,
+                )
+                preset_use_amp = False
+                fp32_fallback = True
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                started = time.perf_counter()
+                prediction, _ = tiled_inference(
+                    model, lq, device, args.tile, args.overlap, False
+                )
+            if not torch.isfinite(prediction).all():
+                raise FloatingPointError(
+                    f"{preset} produced non-finite output even in FP32"
+                )
             if device.type == "cuda":
                 torch.cuda.synchronize()
             latency_ms = (time.perf_counter() - started) * 1000.0
@@ -105,6 +126,11 @@ def main() -> None:
             degradation_type = batch["degradation_type"][0]
             psnr = calculate_psnr(prediction, gt)
             ssim = calculate_ssim(prediction, gt)
+            if not math.isfinite(psnr) or not math.isfinite(ssim):
+                raise FloatingPointError(
+                    f"Non-finite metric for {preset}/{degradation_type}/"
+                    f"{batch['scene_id'][0]}: PSNR={psnr}, SSIM={ssim}"
+                )
             grouped[degradation_type].append((psnr, ssim))
             latencies.append(latency_ms)
             rows.append(
@@ -136,6 +162,9 @@ def main() -> None:
             "load_report": load_report,
             "parameters": count_parameters(model),
             "samples": seen,
+            "amp_requested": use_amp,
+            "amp_used": preset_use_amp,
+            "fp32_fallback": fp32_fallback,
             "macro_psnr": float(np.mean([value["psnr"] for value in per_type.values()])),
             "macro_ssim": float(np.mean([value["ssim"] for value in per_type.values()])),
             "mean_latency_ms": float(np.mean(latencies)),
