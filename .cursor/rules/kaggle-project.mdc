@@ -1,0 +1,32 @@
+---
+description: Kaggle paths, pretrained handling, experiment records, and execution protocol
+alwaysApply: true
+---
+
+# CoT-Restoration Project Rules
+
+- Before editing code, running tests/training, or changing Git state, state the
+  tasks and a realistic time range. Start immediately after approval and move
+  to the next approved task as soon as the current one finishes; never wait for
+  the estimate to elapse.
+- Kaggle examples must use the exact CDD-11 path
+  `/kaggle/input/datasets/mintesnotfikir/cdd-11-30`. Do not use placeholders or
+  a broad `/kaggle/input` data root.
+- Kaggle pretrained files are under
+  `/kaggle/input/datasets/hoangkhanhtung/nafnetmodel`:
+  `NAFNet-GoPro-width32.pth`, `NAFNet-GoPro-width64.pth`,
+  `NAFNet-SIDD-width32.pth`, and `NAFNet-SIDD-width64.pth`.
+- Match checkpoint topology explicitly. GoPro and SIDD checkpoints are not
+  interchangeable. Record missing, unexpected, and mismatched tensors; do not
+  silently accept a partial load in a final run.
+- The current Kaggle CDD-11 input is the small 30-pair-per-degradation subset.
+  Use it for pipeline validation and preliminary ablation, and label results as
+  subset results. Recommend the full CDD-11 before publication-level claims.
+- Split by clean scene ID and reject train/validation/test scene overlap.
+- Every training run must save config, environment, Git commit, dataset
+  manifest, pretrained loading report, epoch log, summary, and checkpoints.
+- `notebook/nafnet.ipynb` benchmarks four pretrained models on partial GoPro and
+  SIDD data; it is not a CDD-11 baseline result.
+- Prefer importing the project notebook from GitHub. Its bootstrap cell clones
+  `https://github.com/HoangKhanhTung0111/CoT-restoration.git`; the user should
+  not need to copy individual cells.

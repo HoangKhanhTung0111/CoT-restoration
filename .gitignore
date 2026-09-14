@@ -1,0 +1,19 @@
+# Local reference repositories
+/NAFNet/
+/CoTIR/
+
+# Generated or temporary artifacts
+/cot_nafnet_smoke_*/
+/hybrid_cot_nafnet/_smoke_workspace/
+/hybrid_cot_nafnet_mvp.zip
+**/__pycache__/
+*.py[cod]
+*.pt
+*.pth
+/experiments/
+/outputs/
+
+# Notebook/editor caches
+.ipynb_checkpoints/
+.vscode/
+.idea/
