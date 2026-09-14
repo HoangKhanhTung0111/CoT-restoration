@@ -38,6 +38,9 @@ CDD-11 baseline. The held-out test split is reserved for final reporting.
 The probe rejects non-finite outputs. If a checkpoint overflows under AMP, it
 records the fallback and retries that preset in FP32 instead of writing `NaN`
 scores. Training performs the same finite-output preflight before epoch one.
+Set `RUN_QUALITATIVE_PROBE = True` to save one labelled
+`Input | Restored | Ground truth` comparison for every degradation type using
+the selected validation preset.
 
 ## Research training controls
 

@@ -14,6 +14,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
+from PIL import Image, ImageDraw
 from torch.utils.data import DataLoader
 
 from .datasets import CDD11Dataset, find_cdd11_root
@@ -53,15 +54,64 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlap", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-samples", type=int, default=0)
+    parser.add_argument(
+        "--save-comparisons",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Save input/restored/target contact sheets for qualitative checks.",
+    )
+    parser.add_argument("--max-saved-per-type", type=int, default=1)
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-cpu", action="store_true")
     return parser.parse_args()
+
+
+def _tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
+    array = (
+        tensor[0]
+        .clamp(0, 1)
+        .mul(255.0)
+        .round()
+        .byte()
+        .permute(1, 2, 0)
+        .numpy()
+    )
+    return Image.fromarray(array, mode="RGB")
+
+
+def save_comparison(
+    lq: torch.Tensor,
+    prediction: torch.Tensor,
+    gt: torch.Tensor,
+    path: Path,
+    title: str,
+) -> None:
+    """Save an explicitly labelled input/output/target contact sheet."""
+    panels = [_tensor_to_pil(item) for item in (lq, prediction, gt)]
+    labels = ("Input (degraded)", "Restored", "Ground truth")
+    header_height = 44
+    canvas = Image.new(
+        "RGB",
+        (sum(panel.width for panel in panels), panels[0].height + header_height),
+        color="white",
+    )
+    draw = ImageDraw.Draw(canvas)
+    draw.text((6, 5), title, fill="black")
+    left = 0
+    for panel, label in zip(panels, labels):
+        canvas.paste(panel, (left, header_height))
+        draw.text((left + 6, 25), label, fill="black")
+        left += panel.width
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path)
 
 
 def main() -> None:
     args = parse_args()
     if args.tile > 0 and args.tile % 16:
         raise ValueError("tile must be divisible by 16")
+    if args.max_saved_per_type < 0:
+        raise ValueError("max-saved-per-type must be non-negative")
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif args.allow_cpu:
@@ -112,6 +162,7 @@ def main() -> None:
         seen = 0
         preset_use_amp = use_amp
         fp32_fallback = False
+        saved_per_type: Dict[str, int] = defaultdict(int)
         for batch in loader:
             if args.max_samples > 0 and seen >= args.max_samples:
                 break
@@ -172,6 +223,22 @@ def main() -> None:
                     "latency_ms": latency_ms,
                 }
             )
+            if (
+                args.save_comparisons
+                and saved_per_type[degradation_type] < args.max_saved_per_type
+            ):
+                scene_id = batch["scene_id"][0]
+                save_comparison(
+                    lq,
+                    prediction,
+                    gt,
+                    output_dir
+                    / "comparisons"
+                    / preset
+                    / f"{degradation_type}_{scene_id}.png",
+                    f"{preset} | {degradation_type} | {scene_id}",
+                )
+                saved_per_type[degradation_type] += 1
             seen += 1
             print(
                 f"{preset} [{seen:03d}/{len(dataset)}] {degradation_type} "
@@ -208,6 +275,7 @@ def main() -> None:
             "amp_requested": use_amp,
             "amp_used": preset_use_amp,
             "fp32_fallback": fp32_fallback,
+            "saved_comparisons": int(sum(saved_per_type.values())),
             "macro_input_psnr": macro_input_psnr,
             "macro_input_ssim": macro_input_ssim,
             "macro_psnr": macro_psnr,

@@ -59,6 +59,13 @@ The report includes input PSNR/SSIM and output-minus-input deltas. Use
 `--split test` only for a final locked evaluation, never to choose the
 pretrained initialization or tune hyperparameters.
 
+For a visual sanity check, save one labelled comparison per degradation type:
+
+```bash
+python -m hybrid_cot_nafnet.probe_pretrained_cdd11 \
+  --presets sidd32 --split validation --save-comparisons
+```
+
 First run one epoch using the 17M GoPro-width32 initialization:
 
 ```bash
