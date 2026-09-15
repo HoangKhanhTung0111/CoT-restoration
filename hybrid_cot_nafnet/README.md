@@ -86,8 +86,12 @@ python -m hybrid_cot_nafnet.train_kaggle \
   --model hybrid --preset gopro32 --pretrained auto \
   --epochs 100 --max-minutes 0 \
   --crop-size 256 --batch-size 4 --microbatch-size 2 --multi-gpu \
-  --patches-per-image 2 --num-workers 0
+  --patches-per-image 2 --num-workers 0 --no-pin-memory
 ```
+
+For short calibration runs, add `--no-save-optimizer` to minimize host-memory
+pressure. In that mode `last.pt` can restore model weights and epoch number,
+but the optimizer/scheduler restart if the run is resumed.
 
 Evaluate the best checkpoint on validation while developing. Only one tile is
 held on the GPU at a time:

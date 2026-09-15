@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import json
 import math
 import os
@@ -86,6 +87,12 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="CDD-11-30 is small; zero avoids worker forks retaining model memory.",
     )
+    parser.add_argument(
+        "--pin-memory",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Pin CPU batches; disabled by default to bound Kaggle host RAM.",
+    )
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-3)
     parser.add_argument("--fft-weight", type=float, default=0.05)
@@ -113,6 +120,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Save full periodic resume checkpoints every N epochs; zero disables them.",
+    )
+    parser.add_argument(
+        "--save-optimizer",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include optimizer/scaler state in last.pt for exact resume.",
     )
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-cpu", action="store_true")
@@ -235,14 +248,21 @@ def make_grad_scaler(enabled: bool):
         return torch.cuda.amp.GradScaler(enabled=enabled)
 
 
-def make_loader(dataset, batch_size: int, workers: int, sampler=None, shuffle=False):
+def make_loader(
+    dataset,
+    batch_size: int,
+    workers: int,
+    sampler=None,
+    shuffle=False,
+    pin_memory: bool = False,
+):
     kwargs = dict(
         dataset=dataset,
         batch_size=batch_size,
         sampler=sampler,
         shuffle=shuffle if sampler is None else False,
         num_workers=workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=bool(pin_memory and torch.cuda.is_available()),
         drop_last=False,
     )
     if workers > 0:
@@ -335,6 +355,62 @@ def model_only_checkpoint_payload(model, epoch, best_psnr, args):
         "use_skip_gates": args.skip_gates,
         "args": vars(args),
     }
+
+
+def memory_snapshot(device: torch.device) -> Dict[str, object]:
+    """Return lightweight Linux/Kaggle host and CUDA memory diagnostics."""
+    result: Dict[str, object] = {
+        "rss_mb": None,
+        "host_available_mb": None,
+        "gpu_allocated_mb": {},
+        "gpu_reserved_mb": {},
+    }
+    status_path = Path("/proc/self/status")
+    if status_path.is_file():
+        for line in status_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                result["rss_mb"] = float(line.split()[1]) / 1024.0
+                break
+    meminfo_path = Path("/proc/meminfo")
+    if meminfo_path.is_file():
+        for line in meminfo_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                result["host_available_mb"] = float(line.split()[1]) / 1024.0
+                break
+    if device.type == "cuda":
+        result["gpu_allocated_mb"] = {
+            str(index): torch.cuda.memory_allocated(index) / 1024**2
+            for index in range(torch.cuda.device_count())
+        }
+        result["gpu_reserved_mb"] = {
+            str(index): torch.cuda.memory_reserved(index) / 1024**2
+            for index in range(torch.cuda.device_count())
+        }
+    return result
+
+
+def append_memory_log(path: Path, epoch: int, stage: str, device: torch.device) -> None:
+    snapshot = memory_snapshot(device)
+    row = {
+        "epoch": epoch,
+        "stage": stage,
+        "rss_mb": snapshot["rss_mb"],
+        "host_available_mb": snapshot["host_available_mb"],
+        "gpu_allocated_mb": json.dumps(snapshot["gpu_allocated_mb"]),
+        "gpu_reserved_mb": json.dumps(snapshot["gpu_reserved_mb"]),
+    }
+    write_header = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(row))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    print(
+        f"memory[{stage}] rss={snapshot['rss_mb']}MB "
+        f"host_available={snapshot['host_available_mb']}MB "
+        f"gpu_allocated={snapshot['gpu_allocated_mb']}",
+        flush=True,
+    )
 
 
 def content_consistency_loss(embedding: Tensor, pair_size: int) -> Tensor:
@@ -444,8 +520,16 @@ def main() -> None:
         num_samples=len(train_set) * max(1, args.patches_per_image),
         generator=torch.Generator().manual_seed(args.seed),
     )
-    train_loader = make_loader(train_set, args.batch_size, args.num_workers, sampler=sampler)
-    val_loader = make_loader(val_set, 1, args.num_workers)
+    train_loader = make_loader(
+        train_set,
+        args.batch_size,
+        args.num_workers,
+        sampler=sampler,
+        pin_memory=args.pin_memory,
+    )
+    val_loader = make_loader(
+        val_set, 1, args.num_workers, pin_memory=args.pin_memory
+    )
 
     model = build_model(
         args.model,
@@ -522,10 +606,16 @@ def main() -> None:
     if args.resume:
         resume = load_torch_file(args.resume)
         model.load_state_dict(extract_state_dict(resume), strict=True)
-        optimizer.load_state_dict(resume["optimizer"])
-        scheduler.load_state_dict(resume["scheduler"])
-        if resume.get("scaler"):
-            scaler.load_state_dict(resume["scaler"])
+        if "optimizer" in resume and "scheduler" in resume:
+            optimizer.load_state_dict(resume["optimizer"])
+            scheduler.load_state_dict(resume["scheduler"])
+            if resume.get("scaler"):
+                scaler.load_state_dict(resume["scaler"])
+        else:
+            print(
+                "Resuming model/epoch only; optimizer and scheduler start fresh.",
+                flush=True,
+            )
         start_epoch = int(resume["epoch"]) + 1
         best_psnr = float(resume.get("best_psnr", best_psnr))
         print(f"Resumed from epoch {start_epoch}")
@@ -578,6 +668,7 @@ def main() -> None:
 
     psnr_loss = PSNRLoss()
     log_path = output_dir / "train_log.csv"
+    memory_log_path = output_dir / "memory_log.csv"
     if not log_path.exists() or start_epoch == 0:
         with log_path.open("w", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(
@@ -589,6 +680,9 @@ def main() -> None:
                     "backbone_lr", "adapter_lr", "minutes",
                 ]
             )
+    if start_epoch == 0 and memory_log_path.exists():
+        memory_log_path.unlink()
+    append_memory_log(memory_log_path, start_epoch, "setup", device)
 
     started_at = time.monotonic()
     stop_for_time = False
@@ -711,13 +805,21 @@ def main() -> None:
 
         scheduler.step()
         optimizer.zero_grad(set_to_none=True)
+        if "batch" in locals():
+            del batch
+        gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
+        append_memory_log(memory_log_path, epoch + 1, "after_train", device)
         print(
             f"epoch {epoch+1:03d}: training pass complete; starting validation",
             flush=True,
         )
         last_validation = validate(model, val_loader, device, use_amp)
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        append_memory_log(memory_log_path, epoch + 1, "after_validation", device)
         val_psnr = last_validation["psnr"]
         averages = {key: value / max(1, optimizer_steps) for key, value in totals.items()}
         elapsed_minutes = (time.monotonic() - started_at) / 60.0
@@ -727,9 +829,20 @@ def main() -> None:
             f"val_f1={last_validation['degradation_micro_f1']:.4f} "
             f"exact={last_validation['degradation_exact_match']:.4f}"
         )
-        payload = checkpoint_payload(
-            model, optimizer, scheduler, scaler, epoch, max(best_psnr, val_psnr), args
-        )
+        if args.save_optimizer:
+            payload = checkpoint_payload(
+                model,
+                optimizer,
+                scheduler,
+                scaler,
+                epoch,
+                max(best_psnr, val_psnr),
+                args,
+            )
+        else:
+            payload = model_only_checkpoint_payload(
+                model, epoch, max(best_psnr, val_psnr), args
+            )
         atomic_save(payload, output_dir / "last.pt")
         if val_psnr > best_psnr:
             best_psnr = val_psnr
@@ -740,6 +853,8 @@ def main() -> None:
         if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
             atomic_save(payload, output_dir / f"epoch_{epoch+1:03d}.pt")
         del payload
+        gc.collect()
+        append_memory_log(memory_log_path, epoch + 1, "after_checkpoint", device)
         with log_path.open("a", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(
                 [

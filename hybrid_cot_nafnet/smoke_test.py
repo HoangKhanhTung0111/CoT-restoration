@@ -85,6 +85,8 @@ def main() -> None:
                 "1",
                 "--num-workers",
                 "0",
+                "--no-pin-memory",
+                "--no-save-optimizer",
                 "--fft-weight",
                 "0",
                 "--no-amp",
