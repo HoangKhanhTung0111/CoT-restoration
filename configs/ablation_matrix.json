@@ -4,6 +4,7 @@
     "pretrained": "auto",
     "seed": 42,
     "crop_size": 256,
+    "val_crop_size": 0,
     "epochs": 100
   },
   "runs": [

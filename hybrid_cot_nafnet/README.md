@@ -10,8 +10,8 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
   prediction, and zero-initialized affine gates for every skip connection.
 - `datasets/cdd11.py`: paired CDD-11 loader with a scene-level validation split.
 - `train_kaggle.py`: AMP training, same-scene paired views, content consistency,
-  degradation supervision, adapter warm-up, checkpoint/resume, and experiment
-  metadata.
+  degradation supervision, adapter warm-up, full-frame validation for checkpoint
+  selection, checkpoint/resume, and experiment metadata.
 - `evaluate.py`: full CDD-11 evaluation using full-frame inference by default,
   with feathered tiles as a memory fallback.
 
@@ -88,7 +88,8 @@ python -m torch.distributed.run --standalone --nproc_per_node 2 \
   --output-dir /kaggle/working/cot_nafnet_output \
   --model hybrid --preset gopro32 --pretrained auto \
   --epochs 100 --max-minutes 0 \
-  --crop-size 256 --batch-size 4 --microbatch-size 2 --multi-gpu \
+  --crop-size 256 --val-crop-size 0 \
+  --batch-size 4 --microbatch-size 2 --multi-gpu \
   --patches-per-image 2 --num-workers 0 --no-pin-memory
 ```
 
@@ -117,6 +118,23 @@ python -m hybrid_cot_nafnet.summarize_experiments \
   --experiments-root /kaggle/working/experiments \
   --output /kaggle/working/experiments/ablation_summary.csv
 ```
+
+The initial controlled A1/A2 calibration is recorded separately in
+`configs/calibration_a1_a2.json`. Run both configurations, full-frame validation,
+full-frame evaluation, and CSV aggregation with:
+
+```bash
+python -m hybrid_cot_nafnet.run_ablation \
+  --config configs/calibration_a1_a2.json \
+  --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
+  --experiments-root /kaggle/working/experiments_a1_a2 \
+  --nproc-per-node 2
+```
+
+This short comparison deliberately uses no backbone freeze and a backbone LR
+scale of 1.0. That keeps the backbone schedule aligned with A0 and makes skip
+gating the only difference between A1 and A2. Adapter-only warm-up remains a
+separate optimization ablation for longer experiments.
 
 To resume an interrupted run, pass the last checkpoint and keep the same model
 configuration:

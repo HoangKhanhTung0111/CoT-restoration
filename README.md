@@ -25,6 +25,11 @@ state-of-the-art CDD-11 performance. Every run records its configuration,
 environment, dataset split, pretrained loading report, checkpoints, training
 history, and evaluation metrics for later ablation.
 
+After finalizing A0, import
+[`notebooks/kaggle_ablation_a1_a2.ipynb`](https://github.com/HoangKhanhTung0111/CoT-restoration/blob/main/notebooks/kaggle_ablation_a1_a2.ipynb)
+to run the controlled five-epoch A1/A2 comparison. Its first Run All is a dry
+run; enable `RUN_ABLATIONS` only after checking the printed commands.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
@@ -56,6 +61,10 @@ forward under Kaggle PyTorch 2.10. The notebook's logical batch 4 and
 microbatch 2 become batch 2 and microbatch 1 per GPU. CDD-11 evaluation uses
 artifact-free full-frame inference on one GPU by default. Feathered tiled
 inference remains available as a memory fallback.
+
+Training crops remain 256 pixels, while validation uses complete images by
+default (`--val-crop-size 0`). Consequently, `best.pt` is selected with the
+same full-frame PSNR protocol used by the final validation evaluator.
 
 Six ordered ablations are recorded in `configs/ablation_matrix.json`. After
 multiple runs, collect their saved JSON metrics with:

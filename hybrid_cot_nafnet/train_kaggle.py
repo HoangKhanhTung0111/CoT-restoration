@@ -75,6 +75,15 @@ def parse_args() -> argparse.Namespace:
         help="Optional wall-clock safety limit; zero means no time limit.",
     )
     parser.add_argument("--crop-size", type=int, default=256)
+    parser.add_argument(
+        "--val-crop-size",
+        type=int,
+        default=0,
+        help=(
+            "Validation crop size; zero evaluates complete images and matches the "
+            "default final-evaluation protocol."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument(
         "--microbatch-size",
@@ -541,6 +550,10 @@ def main() -> None:
         raise ValueError("backbone-lr-scale must be in (0, 1]")
     if args.crop_size % 16:
         raise ValueError("crop-size must be divisible by 16 for the four-level NAFNet")
+    if args.val_crop_size < 0 or (
+        args.val_crop_size > 0 and args.val_crop_size % 16
+    ):
+        raise ValueError("val-crop-size must be zero or divisible by 16")
 
     distributed, rank, local_rank, world_size, device = distributed_context(args)
     is_main = rank == 0
@@ -591,7 +604,7 @@ def main() -> None:
     val_set = CDD11Dataset(
         data_root,
         mode="val",
-        crop_size=args.crop_size,
+        crop_size=args.val_crop_size,
         val_fraction=args.val_fraction,
         split_seed=args.seed,
         augment=False,
@@ -616,6 +629,8 @@ def main() -> None:
                 "train_samples": len(train_set),
                 "validation_samples": len(val_set),
                 "test_samples": len(test_probe),
+                "train_crop_size": args.crop_size,
+                "validation_crop_size": args.val_crop_size,
             },
         )
     global_sample_count = len(train_set) * max(1, args.patches_per_image)
@@ -1142,6 +1157,10 @@ def main() -> None:
                 "model_type": args.model,
                 "preset": args.preset,
                 "parameters": parameter_counts,
+                "validation_crop_size": args.val_crop_size,
+                "validation_protocol": (
+                    "full_frame" if args.val_crop_size == 0 else "center_crop"
+                ),
                 "last_validation": last_validation,
                 "amp_requested": requested_amp,
                 "amp_used": use_amp,

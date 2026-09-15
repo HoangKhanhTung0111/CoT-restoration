@@ -38,7 +38,9 @@ def create_split(root: Path, split: str, count: int, seed: int, offset: int = 0)
     rng = np.random.default_rng(seed)
     for index in range(count):
         scene_id = f"{index + offset:05d}"
-        clear = rng.integers(0, 256, size=(16, 16, 3), dtype=np.uint8)
+        # Larger than the training crop so the smoke run exercises the
+        # independent full-frame validation protocol.
+        clear = rng.integers(0, 256, size=(32, 48, 3), dtype=np.uint8)
         Image.fromarray(clear).save(split_dir / "clear" / f"{scene_id}.png")
         for degradation_type in CDD11_TYPES:
             Image.fromarray(degrade(clear, degradation_type)).save(
@@ -141,6 +143,13 @@ def main() -> None:
         )
         with (eval_output / "summary.json").open(encoding="utf-8") as handle:
             summary = json.load(handle)
+        with (train_output / "dataset_manifest.json").open(encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        with (train_output / "run_summary.json").open(encoding="utf-8") as handle:
+            training_summary = json.load(handle)
+        assert manifest["train_crop_size"] == 16
+        assert manifest["validation_crop_size"] == 0
+        assert training_summary["validation_protocol"] == "full_frame"
         assert summary["samples"] == len(CDD11_TYPES)
         assert np.isfinite(summary["macro_psnr"])
         assert np.isfinite(summary["macro_ssim"])
