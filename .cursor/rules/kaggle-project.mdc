@@ -34,5 +34,7 @@ alwaysApply: true
   not need to copy individual cells.
 - Kaggle T4 sessions expose two T4 GPUs while the P100 option exposes one P100.
   The user intends to select T4; training should use both visible T4 devices and
-  record per-device memory. Do not assume evaluation batch size one benefits
-  from two GPUs.
+  record per-rank device memory through `DistributedDataParallel`. Do not use
+  `nn.DataParallel`: it leaked one host-side model-sized buffer per optimizer
+  step under Kaggle PyTorch 2.10. Do not assume evaluation batch size one
+  benefits from two GPUs.

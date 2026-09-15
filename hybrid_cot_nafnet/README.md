@@ -69,7 +69,8 @@ python -m hybrid_cot_nafnet.probe_pretrained_cdd11 \
 First run one epoch using the 17M GoPro-width32 initialization:
 
 ```bash
-python -m hybrid_cot_nafnet.train_kaggle \
+python -m torch.distributed.run --standalone --nproc_per_node 2 \
+  -m hybrid_cot_nafnet.train_kaggle \
   --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
   --output-dir /kaggle/working/cot_nafnet_smoke \
   --preset gopro32 --pretrained auto --epochs 1 --max-minutes 8 \
@@ -80,7 +81,8 @@ python -m hybrid_cot_nafnet.train_kaggle \
 Then start the research run:
 
 ```bash
-python -m hybrid_cot_nafnet.train_kaggle \
+python -m torch.distributed.run --standalone --nproc_per_node 2 \
+  -m hybrid_cot_nafnet.train_kaggle \
   --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
   --output-dir /kaggle/working/cot_nafnet_output \
   --model hybrid --preset gopro32 --pretrained auto \
@@ -119,7 +121,8 @@ To resume an interrupted run, pass the last checkpoint and keep the same model
 configuration:
 
 ```bash
-python -m hybrid_cot_nafnet.train_kaggle \
+python -m torch.distributed.run --standalone --nproc_per_node 2 \
+  -m hybrid_cot_nafnet.train_kaggle \
   --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
   --output-dir /kaggle/working/cot_nafnet_output \
   --model hybrid --preset gopro32 --epochs 100 --max-minutes 0 \

@@ -152,8 +152,7 @@ class GatedCoTAdapter(nn.Module):
             "degradation_embedding": degradation_embedding,
             "content_embedding": content_embedding,
             "plan_embedding": plan,
-            # Keep scalar statistics one-dimensional so DataParallel can gather
-            # values from two Kaggle T4 GPUs without scalar-gather warnings.
+            # Keep scalar statistics one-dimensional for batched/parallel consumers.
             "gate_regularization": torch.tanh(active_affine).abs().mean().reshape(1),
             "gate_mean_abs": torch.tanh(active_affine).abs().detach().mean().reshape(1),
             "gate_max_abs": torch.tanh(active_affine).abs().detach().amax().reshape(1),

@@ -19,8 +19,10 @@ from typing import Dict
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, RandomSampler
 
 if __package__ in {None, ""}:
@@ -107,7 +109,7 @@ def parse_args() -> argparse.Namespace:
         "--multi-gpu",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use all visible CUDA devices through DataParallel when more than one exists.",
+        help="Use torchrun DistributedDataParallel when WORLD_SIZE is greater than one.",
     )
     parser.add_argument("--freeze-backbone-epochs", type=int, default=3)
     parser.add_argument("--backbone-lr-scale", type=float, default=0.1)
@@ -138,6 +140,42 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def distributed_context(args: argparse.Namespace):
+    """Initialize torchrun state and bind one process to one device."""
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    distributed = world_size > 1
+    if distributed and not args.multi_gpu:
+        raise RuntimeError("torchrun launched multiple ranks but --no-multi-gpu was set")
+    if distributed:
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        if backend == "nccl":
+            torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend=backend, init_method="env://")
+    if torch.cuda.is_available():
+        device = torch.device("cuda", local_rank if distributed else 0)
+    elif args.allow_cpu:
+        device = torch.device("cpu")
+    else:
+        raise RuntimeError(
+            "CUDA is unavailable. Enable a Kaggle GPU or pass --allow-cpu for testing."
+        )
+    if (
+        args.multi_gpu
+        and not distributed
+        and device.type == "cuda"
+        and torch.cuda.device_count() > 1
+    ):
+        raise RuntimeError(
+            "Multiple GPUs are visible, but training was not launched with torchrun. "
+            "Use `python -m torch.distributed.run --standalone "
+            "--nproc_per_node=2 -m hybrid_cot_nafnet.train_kaggle ...` or pass "
+            "--no-multi-gpu for a single-GPU fallback."
+        )
+    return distributed, rank, local_rank, world_size, device
 
 
 def load_torch_file(path: str | Path, device: str = "cpu"):
@@ -389,15 +427,53 @@ def memory_snapshot(device: torch.device) -> Dict[str, object]:
     return result
 
 
-def append_memory_log(path: Path, epoch: int, stage: str, device: torch.device) -> None:
+def append_memory_log(
+    path: Path,
+    epoch: int,
+    stage: str,
+    device: torch.device,
+    rank: int,
+    world_size: int,
+) -> None:
     snapshot = memory_snapshot(device)
+    local_rss = float(snapshot["rss_mb"] or 0.0)
+    local_gpu_allocated = (
+        float(torch.cuda.memory_allocated(device) / 1024**2)
+        if device.type == "cuda"
+        else 0.0
+    )
+    local_gpu_reserved = (
+        float(torch.cuda.memory_reserved(device) / 1024**2)
+        if device.type == "cuda"
+        else 0.0
+    )
+    local_values = torch.tensor(
+        [local_rss, local_gpu_allocated, local_gpu_reserved],
+        dtype=torch.float64,
+        device=device,
+    )
+    gathered = [torch.zeros_like(local_values) for _ in range(world_size)]
+    if world_size > 1:
+        dist.all_gather(gathered, local_values)
+    else:
+        gathered[0].copy_(local_values)
+    if rank != 0:
+        return
+    rank_values = [item.cpu().tolist() for item in gathered]
     row = {
         "epoch": epoch,
         "stage": stage,
-        "rss_mb": snapshot["rss_mb"],
+        "rss_total_mb": sum(item[0] for item in rank_values),
+        "rss_by_rank_mb": json.dumps(
+            {str(index): item[0] for index, item in enumerate(rank_values)}
+        ),
         "host_available_mb": snapshot["host_available_mb"],
-        "gpu_allocated_mb": json.dumps(snapshot["gpu_allocated_mb"]),
-        "gpu_reserved_mb": json.dumps(snapshot["gpu_reserved_mb"]),
+        "gpu_allocated_by_rank_mb": json.dumps(
+            {str(index): item[1] for index, item in enumerate(rank_values)}
+        ),
+        "gpu_reserved_by_rank_mb": json.dumps(
+            {str(index): item[2] for index, item in enumerate(rank_values)}
+        ),
     }
     write_header = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as handle:
@@ -406,9 +482,10 @@ def append_memory_log(path: Path, epoch: int, stage: str, device: torch.device) 
             writer.writeheader()
         writer.writerow(row)
     print(
-        f"memory[{stage}] rss={snapshot['rss_mb']}MB "
+        f"memory[{stage}] rss_total={row['rss_total_mb']:.1f}MB "
+        f"rss_by_rank={row['rss_by_rank_mb']} "
         f"host_available={snapshot['host_available_mb']}MB "
-        f"gpu_allocated={snapshot['gpu_allocated_mb']}",
+        f"gpu_allocated={row['gpu_allocated_by_rank_mb']}",
         flush=True,
     )
 
@@ -431,8 +508,19 @@ def set_backbone_trainable(model: nn.Module, trainable: bool) -> None:
             parameter.requires_grad_(trainable)
 
 
+def clear_backbone_gradients(model: nn.Module) -> None:
+    """Freeze DDP backbone updates without rebuilding reducer hooks."""
+    for name, parameter in unwrap_model(model).named_parameters():
+        if not name.startswith("cot_adapter."):
+            parameter.grad = None
+
+
 def unwrap_model(model: nn.Module) -> nn.Module:
-    return model.module if isinstance(model, nn.DataParallel) else model
+    return (
+        model.module
+        if isinstance(model, (nn.DataParallel, DistributedDataParallel))
+        else model
+    )
 
 
 def has_cot_adapter(model: nn.Module) -> bool:
@@ -454,13 +542,17 @@ def main() -> None:
     if args.crop_size % 16:
         raise ValueError("crop-size must be divisible by 16 for the four-level NAFNet")
 
-    seed_everything(args.seed)
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif args.allow_cpu:
-        device = torch.device("cpu")
-    else:
-        raise RuntimeError("CUDA is unavailable. Enable a Kaggle GPU or pass --allow-cpu for testing.")
+    distributed, rank, local_rank, world_size, device = distributed_context(args)
+    is_main = rank == 0
+    if args.batch_size % world_size or args.microbatch_size % world_size:
+        raise ValueError(
+            "Global batch-size and microbatch-size must be divisible by WORLD_SIZE"
+        )
+    local_batch_size = args.batch_size // world_size
+    local_microbatch_size = args.microbatch_size // world_size
+    if local_microbatch_size < 1:
+        raise ValueError("Per-rank microbatch size must be at least one")
+    seed_everything(args.seed + rank)
     requested_amp = bool(args.amp)
     use_amp = bool(requested_amp and device.type == "cuda")
     if hasattr(torch, "set_float32_matmul_precision"):
@@ -469,12 +561,23 @@ def main() -> None:
     data_root = find_cdd11_root(args.data_root)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(
-        output_dir / "run_config.json",
-        {**vars(args), "resolved_data_root": str(data_root)},
-    )
-    _write_json(output_dir / "environment.json", _environment_info(device))
-    _write_json(output_dir / "git_info.json", _git_info(Path(__file__).resolve().parents[1]))
+    if is_main:
+        _write_json(
+            output_dir / "run_config.json",
+            {
+                **vars(args),
+                "resolved_data_root": str(data_root),
+                "distributed": distributed,
+                "world_size": world_size,
+                "per_rank_batch_size": local_batch_size,
+                "per_rank_microbatch_size": local_microbatch_size,
+            },
+        )
+        _write_json(output_dir / "environment.json", _environment_info(device))
+        _write_json(
+            output_dir / "git_info.json",
+            _git_info(Path(__file__).resolve().parents[1]),
+        )
 
     train_set = CDD11Dataset(
         data_root,
@@ -502,33 +605,39 @@ def main() -> None:
         raise RuntimeError(
             f"Scene IDs overlap between development and test: {sorted(overlap_with_test)}"
         )
-    _write_json(
-        output_dir / "dataset_manifest.json",
-        {
-            "root": str(data_root),
-            "train_scene_ids": list(train_set.scene_ids),
-            "validation_scene_ids": list(val_set.scene_ids),
-            "test_scene_ids": list(test_probe.scene_ids),
-            "train_samples": len(train_set),
-            "validation_samples": len(val_set),
-            "test_samples": len(test_probe),
-        },
-    )
+    if is_main:
+        _write_json(
+            output_dir / "dataset_manifest.json",
+            {
+                "root": str(data_root),
+                "train_scene_ids": list(train_set.scene_ids),
+                "validation_scene_ids": list(val_set.scene_ids),
+                "test_scene_ids": list(test_probe.scene_ids),
+                "train_samples": len(train_set),
+                "validation_samples": len(val_set),
+                "test_samples": len(test_probe),
+            },
+        )
+    global_sample_count = len(train_set) * max(1, args.patches_per_image)
+    if global_sample_count % world_size:
+        raise ValueError("Sample count must be divisible by WORLD_SIZE")
     sampler = RandomSampler(
         train_set,
         replacement=True,
-        num_samples=len(train_set) * max(1, args.patches_per_image),
-        generator=torch.Generator().manual_seed(args.seed),
+        num_samples=global_sample_count // world_size,
+        generator=torch.Generator().manual_seed(args.seed + rank),
     )
     train_loader = make_loader(
         train_set,
-        args.batch_size,
+        local_batch_size,
         args.num_workers,
         sampler=sampler,
         pin_memory=args.pin_memory,
     )
-    val_loader = make_loader(
-        val_set, 1, args.num_workers, pin_memory=args.pin_memory
+    val_loader = (
+        make_loader(val_set, 1, args.num_workers, pin_memory=args.pin_memory)
+        if is_main
+        else None
     )
 
     model = build_model(
@@ -538,13 +647,17 @@ def main() -> None:
         use_skip_gates=args.skip_gates,
     ).to(device)
     parameter_counts = count_parameters(model)
-    print(train_set.summary())
-    print(val_set.summary())
-    print(test_probe.summary())
-    print(
-        f"Model={args.model}/{args.preset} total={parameter_counts['total']/1e6:.3f}M "
-        f"adapter={parameter_counts['adapter']/1e6:.3f}M device={device} amp={use_amp}"
-    )
+    if is_main:
+        print(train_set.summary())
+        print(val_set.summary())
+        print(test_probe.summary())
+        print(
+            f"Model={args.model}/{args.preset} "
+            f"total={parameter_counts['total']/1e6:.3f}M "
+            f"adapter={parameter_counts['adapter']/1e6:.3f}M "
+            f"world_size={world_size} global_batch={args.batch_size} "
+            f"per_rank_batch={local_batch_size} device={device} amp={use_amp}"
+        )
     if parameter_counts["adapter"] >= 500_000:
         raise RuntimeError("Adapter exceeds the 0.5M parameter budget")
 
@@ -560,11 +673,12 @@ def main() -> None:
                 "Attach the nafnetmodel Kaggle input or pass --pretrained none."
             )
         report = load_compatible_weights(model, pretrained_path)
-        print(f"Loaded pretrained weights: {report}")
-        _write_json(
-            output_dir / "pretrained_report.json",
-            {"path": str(pretrained_path), **report},
-        )
+        if is_main:
+            print(f"Loaded pretrained weights: {report}")
+            _write_json(
+                output_dir / "pretrained_report.json",
+                {"path": str(pretrained_path), **report},
+            )
         if report["backbone_missing"] and not args.allow_partial_pretrained:
             raise RuntimeError(
                 "Pretrained checkpoint does not fully match the selected backbone: "
@@ -612,64 +726,92 @@ def main() -> None:
             if resume.get("scaler"):
                 scaler.load_state_dict(resume["scaler"])
         else:
-            print(
-                "Resuming model/epoch only; optimizer and scheduler start fresh.",
-                flush=True,
-            )
+            if is_main:
+                print(
+                    "Resuming model/epoch only; optimizer and scheduler start fresh.",
+                    flush=True,
+                )
         start_epoch = int(resume["epoch"]) + 1
         best_psnr = float(resume.get("best_psnr", best_psnr))
-        print(f"Resumed from epoch {start_epoch}")
+        if is_main:
+            print(f"Resumed from epoch {start_epoch}")
 
-    gpu_ids = list(range(torch.cuda.device_count())) if device.type == "cuda" else []
-    if args.multi_gpu and len(gpu_ids) > 1:
-        model = nn.DataParallel(model, device_ids=gpu_ids, output_device=gpu_ids[0])
-        print(
-            f"Multi-GPU enabled with DataParallel on {len(gpu_ids)} devices: "
-            + ", ".join(torch.cuda.get_device_name(index) for index in gpu_ids)
-        )
-    else:
-        print("Multi-GPU disabled or fewer than two CUDA devices are visible")
+    current_backbone_trainable = not (
+        has_cot_adapter(model) and start_epoch < args.freeze_backbone_epochs
+    )
+    if not distributed:
+        set_backbone_trainable(model, current_backbone_trainable)
+    if distributed:
+        if device.type == "cuda":
+            model = DistributedDataParallel(
+                model,
+                device_ids=[local_rank],
+                output_device=local_rank,
+                broadcast_buffers=False,
+            )
+        else:
+            model = DistributedDataParallel(model, broadcast_buffers=False)
+        if is_main:
+            print(
+                f"Multi-GPU enabled with DistributedDataParallel on {world_size} "
+                "processes (one fixed model replica per device)."
+            )
+    elif is_main:
+        print("Single-process training enabled")
 
     # Cheap preflight catches tensor/channel mistakes before a long Kaggle run.
     sample = train_set[0]["lq"][None].to(device)
     with torch.no_grad(), amp_context(device, use_amp):
         probe = model(sample)
-    if not torch.isfinite(probe).all() and use_amp:
-        print(
-            "WARNING: pretrained model produced non-finite output with AMP; "
-            "falling back to FP32 for this run."
-        )
+    finite_flag = torch.tensor(
+        [int(torch.isfinite(probe).all())], dtype=torch.int32, device=device
+    )
+    if distributed:
+        dist.all_reduce(finite_flag, op=dist.ReduceOp.MIN)
+    if not finite_flag.item() and use_amp:
+        if is_main:
+            print(
+                "WARNING: pretrained model produced non-finite output with AMP; "
+                "falling back to FP32 for this run."
+            )
         use_amp = False
         args.amp = False
         scaler = make_grad_scaler(False)
         with torch.no_grad(), amp_context(device, False):
             probe = model(sample)
-    if probe.shape != sample.shape or not torch.isfinite(probe).all():
+    valid_probe = probe.shape == sample.shape and bool(torch.isfinite(probe).all())
+    valid_probe_flag = torch.tensor([int(valid_probe)], dtype=torch.int32, device=device)
+    if distributed:
+        dist.all_reduce(valid_probe_flag, op=dist.ReduceOp.MIN)
+    if not valid_probe_flag.item():
         raise RuntimeError(
             f"Preflight failed even after numerical fallback: "
             f"input={sample.shape}, output={probe.shape}, "
             f"finite={bool(torch.isfinite(probe).all())}"
         )
-    _write_json(
-        output_dir / "runtime_resolution.json",
-        {
-            "amp_requested": requested_amp,
-            "amp_used": use_amp,
-            "multi_gpu": isinstance(model, nn.DataParallel),
-            "visible_cuda_devices": gpu_ids,
-        },
-    )
+    if is_main:
+        _write_json(
+            output_dir / "runtime_resolution.json",
+            {
+                "amp_requested": requested_amp,
+                "amp_used": use_amp,
+                "multi_gpu": distributed,
+                "parallel_strategy": "ddp" if distributed else "single_process",
+                "world_size": world_size,
+                "visible_cuda_devices": list(range(torch.cuda.device_count())),
+            },
+        )
     del sample, probe
     if device.type == "cuda":
         torch.cuda.empty_cache()
-        for index in gpu_ids:
-            torch.cuda.reset_peak_memory_stats(index)
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        torch.cuda.reset_peak_memory_stats(device)
+        if is_main:
+            print(f"Rank 0 GPU: {torch.cuda.get_device_name(device)}")
 
     psnr_loss = PSNRLoss()
     log_path = output_dir / "train_log.csv"
     memory_log_path = output_dir / "memory_log.csv"
-    if not log_path.exists() or start_epoch == 0:
+    if is_main and (not log_path.exists() or start_epoch == 0):
         with log_path.open("w", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(
                 [
@@ -680,9 +822,13 @@ def main() -> None:
                     "backbone_lr", "adapter_lr", "minutes",
                 ]
             )
-    if start_epoch == 0 and memory_log_path.exists():
+    if is_main and start_epoch == 0 and memory_log_path.exists():
         memory_log_path.unlink()
-    append_memory_log(memory_log_path, start_epoch, "setup", device)
+    if distributed:
+        dist.barrier()
+    append_memory_log(
+        memory_log_path, start_epoch, "setup", device, rank, world_size
+    )
 
     started_at = time.monotonic()
     stop_for_time = False
@@ -691,8 +837,11 @@ def main() -> None:
         backbone_trainable = not (
             has_cot_adapter(model) and epoch < args.freeze_backbone_epochs
         )
-        set_backbone_trainable(model, backbone_trainable)
-        if epoch == start_epoch or epoch == args.freeze_backbone_epochs:
+        if backbone_trainable != current_backbone_trainable:
+            if not distributed:
+                set_backbone_trainable(model, backbone_trainable)
+            current_backbone_trainable = backbone_trainable
+        if is_main and (epoch == start_epoch or epoch == args.freeze_backbone_epochs):
             print(
                 f"Backbone {'trainable' if backbone_trainable else 'frozen'} "
                 f"at epoch {epoch + 1}"
@@ -710,11 +859,11 @@ def main() -> None:
         for step, batch in enumerate(train_loader, start=1):
             optimizer.zero_grad(set_to_none=True)
             current_batch = batch["lq"].shape[0]
-            microbatch_count = math.ceil(current_batch / args.microbatch_size)
+            microbatch_count = math.ceil(current_batch / local_microbatch_size)
             step_values = {key: 0.0 for key in totals}
             try:
-                for begin in range(0, current_batch, args.microbatch_size):
-                    end = min(current_batch, begin + args.microbatch_size)
+                for begin in range(0, current_batch, local_microbatch_size):
+                    end = min(current_batch, begin + local_microbatch_size)
                     lq = batch["lq"][begin:end].to(device, non_blocking=True)
                     gt = batch["gt"][begin:end].to(device, non_blocking=True)
                     labels = batch["label"][begin:end].to(device, non_blocking=True)
@@ -733,51 +882,76 @@ def main() -> None:
                                 ),
                             ]
                         )
-                    with amp_context(device, use_amp):
-                        if has_cot_adapter(model):
-                            prediction, auxiliary = model(lq, return_aux=True)
-                            degradation = F.binary_cross_entropy_with_logits(
-                                auxiliary["degradation_logits"].float(), labels.float()
+                    synchronize = end >= current_batch
+                    sync_context = (
+                        nullcontext()
+                        if not distributed or synchronize
+                        else model.no_sync()
+                    )
+                    with sync_context:
+                        with amp_context(device, use_amp):
+                            if has_cot_adapter(model):
+                                prediction, auxiliary = model(lq, return_aux=True)
+                                degradation = F.binary_cross_entropy_with_logits(
+                                    auxiliary["degradation_logits"].float(),
+                                    labels.float(),
+                                )
+                            else:
+                                prediction = model(lq)
+                                degradation = torch.zeros((), device=device)
+                                auxiliary = {}
+                            restoration = psnr_loss(prediction, gt)
+                            if args.fft_weight:
+                                restoration = restoration + args.fft_weight * fft_loss(
+                                    prediction, gt
+                                )
+                            if has_paired_view:
+                                content = content_consistency_loss(
+                                    auxiliary["content_embedding"], pair_size
+                                )
+                            else:
+                                content = torch.zeros((), device=device)
+                            if has_cot_adapter(model):
+                                decorrelation = embedding_decorrelation_loss(
+                                    auxiliary["content_embedding"],
+                                    auxiliary["degradation_embedding"],
+                                )
+                                gate = auxiliary["gate_regularization"].mean()
+                            else:
+                                decorrelation = torch.zeros((), device=device)
+                                gate = torch.zeros((), device=device)
+                            loss = (
+                                restoration
+                                + args.degradation_weight * degradation
+                                + args.content_weight * content
+                                + args.decorrelation_weight * decorrelation
+                                + args.gate_weight * gate
                             )
-                        else:
-                            prediction = model(lq)
-                            degradation = torch.zeros((), device=device)
-                            auxiliary = {}
-                        restoration = psnr_loss(prediction, gt)
-                        if args.fft_weight:
-                            restoration = restoration + args.fft_weight * fft_loss(prediction, gt)
-                        if has_paired_view:
-                            content = content_consistency_loss(
-                                auxiliary["content_embedding"], pair_size
-                            )
-                        else:
-                            content = torch.zeros((), device=device)
-                        if has_cot_adapter(model):
-                            decorrelation = embedding_decorrelation_loss(
-                                auxiliary["content_embedding"],
-                                auxiliary["degradation_embedding"],
-                            )
-                            gate = auxiliary["gate_regularization"].mean()
-                        else:
-                            decorrelation = torch.zeros((), device=device)
-                            gate = torch.zeros((), device=device)
-                        loss = (
-                            restoration
-                            + args.degradation_weight * degradation
-                            + args.content_weight * content
-                            + args.decorrelation_weight * decorrelation
-                            + args.gate_weight * gate
-                        )
-                        scaled_loss = loss / microbatch_count
-                    scaler.scale(scaled_loss).backward()
+                            scaled_loss = loss / microbatch_count
+                        scaler.scale(scaled_loss).backward()
                     step_values["total"] += loss.detach().item() / microbatch_count
                     step_values["restoration"] += restoration.detach().item() / microbatch_count
                     step_values["degradation"] += degradation.detach().item() / microbatch_count
                     step_values["content"] += content.detach().item() / microbatch_count
                     step_values["decorrelation"] += decorrelation.detach().item() / microbatch_count
                     step_values["gate"] += gate.detach().item() / microbatch_count
-                    del lq, gt, labels, prediction, loss, scaled_loss, auxiliary
+                    del (
+                        lq,
+                        gt,
+                        labels,
+                        prediction,
+                        loss,
+                        scaled_loss,
+                        auxiliary,
+                        restoration,
+                        degradation,
+                        content,
+                        decorrelation,
+                        gate,
+                    )
                 scaler.unscale_(optimizer)
+                if not backbone_trainable:
+                    clear_backbone_gradients(model)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 scaler.step(optimizer)
                 scaler.update()
@@ -792,16 +966,25 @@ def main() -> None:
             optimizer_steps += 1
             for key in totals:
                 totals[key] += step_values[key]
-            if step % args.log_every == 0 or step == len(train_loader):
+            if is_main and (step % args.log_every == 0 or step == len(train_loader)):
                 elapsed = (time.monotonic() - started_at) / 60.0
                 print(
                     f"epoch {epoch+1:03d}/{args.epochs} step {step:04d}/{len(train_loader)} "
                     f"loss={step_values['total']:.4f} deg={step_values['degradation']:.4f} "
                     f"elapsed={elapsed:.1f}m"
                 )
-            if args.max_minutes > 0 and (time.monotonic() - started_at) / 60.0 >= args.max_minutes:
-                stop_for_time = True
-                break
+            if args.max_minutes > 0:
+                reached_limit = int(
+                    (time.monotonic() - started_at) / 60.0 >= args.max_minutes
+                )
+                limit_flag = torch.tensor(
+                    [reached_limit], dtype=torch.int32, device=device
+                )
+                if distributed:
+                    dist.all_reduce(limit_flag, op=dist.ReduceOp.MAX)
+                if limit_flag.item():
+                    stop_for_time = True
+                    break
 
         scheduler.step()
         optimizer.zero_grad(set_to_none=True)
@@ -810,103 +993,174 @@ def main() -> None:
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
-        append_memory_log(memory_log_path, epoch + 1, "after_train", device)
-        print(
-            f"epoch {epoch+1:03d}: training pass complete; starting validation",
-            flush=True,
+        aggregate = torch.tensor(
+            [*[totals[key] for key in totals], float(optimizer_steps)],
+            dtype=torch.float64,
+            device=device,
         )
-        last_validation = validate(model, val_loader, device, use_amp)
+        if distributed:
+            dist.all_reduce(aggregate, op=dist.ReduceOp.SUM)
+        reduced = aggregate.cpu().tolist()
+        reduced_totals = dict(zip(totals, reduced[:-1]))
+        reduced_steps = max(1.0, reduced[-1])
+        append_memory_log(
+            memory_log_path,
+            epoch + 1,
+            "after_train",
+            device,
+            rank,
+            world_size,
+        )
+        if is_main:
+            print(
+                f"epoch {epoch+1:03d}: training pass complete; starting validation",
+                flush=True,
+            )
+            assert val_loader is not None
+            last_validation = validate(model, val_loader, device, use_amp)
+        metric_keys = (
+            "psnr",
+            "bce",
+            "degradation_micro_f1",
+            "degradation_exact_match",
+            "gate_mean_abs",
+        )
+        metric_tensor = torch.tensor(
+            [last_validation.get(key, 0.0) for key in metric_keys],
+            dtype=torch.float64,
+            device=device,
+        )
+        if distributed:
+            dist.broadcast(metric_tensor, src=0)
+        last_validation = dict(zip(metric_keys, metric_tensor.cpu().tolist()))
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
-        append_memory_log(memory_log_path, epoch + 1, "after_validation", device)
-        val_psnr = last_validation["psnr"]
-        averages = {key: value / max(1, optimizer_steps) for key, value in totals.items()}
-        elapsed_minutes = (time.monotonic() - started_at) / 60.0
-        print(
-            f"epoch {epoch+1:03d}: val_psnr={val_psnr:.4f} "
-            f"val_bce={last_validation['bce']:.4f} "
-            f"val_f1={last_validation['degradation_micro_f1']:.4f} "
-            f"exact={last_validation['degradation_exact_match']:.4f}"
+        append_memory_log(
+            memory_log_path,
+            epoch + 1,
+            "after_validation",
+            device,
+            rank,
+            world_size,
         )
-        if args.save_optimizer:
-            payload = checkpoint_payload(
-                model,
-                optimizer,
-                scheduler,
-                scaler,
-                epoch,
-                max(best_psnr, val_psnr),
-                args,
+        val_psnr = last_validation["psnr"]
+        averages = {key: value / reduced_steps for key, value in reduced_totals.items()}
+        elapsed_minutes = (time.monotonic() - started_at) / 60.0
+        if is_main:
+            print(
+                f"epoch {epoch+1:03d}: val_psnr={val_psnr:.4f} "
+                f"val_bce={last_validation['bce']:.4f} "
+                f"val_f1={last_validation['degradation_micro_f1']:.4f} "
+                f"exact={last_validation['degradation_exact_match']:.4f}"
             )
-        else:
-            payload = model_only_checkpoint_payload(
-                model, epoch, max(best_psnr, val_psnr), args
-            )
-        atomic_save(payload, output_dir / "last.pt")
+            if args.save_optimizer:
+                payload = checkpoint_payload(
+                    model,
+                    optimizer,
+                    scheduler,
+                    scaler,
+                    epoch,
+                    max(best_psnr, val_psnr),
+                    args,
+                )
+            else:
+                payload = model_only_checkpoint_payload(
+                    model, epoch, max(best_psnr, val_psnr), args
+                )
+            atomic_save(payload, output_dir / "last.pt")
+            if val_psnr > best_psnr:
+                atomic_save(
+                    model_only_checkpoint_payload(model, epoch, val_psnr, args),
+                    output_dir / "best.pt",
+                )
+            if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
+                atomic_save(payload, output_dir / f"epoch_{epoch+1:03d}.pt")
+            del payload
         if val_psnr > best_psnr:
             best_psnr = val_psnr
-            atomic_save(
-                model_only_checkpoint_payload(model, epoch, best_psnr, args),
-                output_dir / "best.pt",
-            )
-        if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
-            atomic_save(payload, output_dir / f"epoch_{epoch+1:03d}.pt")
-        del payload
         gc.collect()
-        append_memory_log(memory_log_path, epoch + 1, "after_checkpoint", device)
-        with log_path.open("a", newline="", encoding="utf-8") as handle:
-            csv.writer(handle).writerow(
-                [
-                    epoch + 1,
-                    averages["total"],
-                    averages["restoration"],
-                    averages["degradation"],
-                    averages["content"],
-                    averages["decorrelation"],
-                    averages["gate"],
-                    last_validation["psnr"],
-                    last_validation["bce"],
-                    last_validation["degradation_micro_f1"],
-                    last_validation["degradation_exact_match"],
-                    last_validation["gate_mean_abs"],
-                    optimizer.param_groups[0]["lr"],
-                    optimizer.param_groups[-1]["lr"],
-                    elapsed_minutes,
-                ]
-            )
+        if distributed:
+            dist.barrier()
+        append_memory_log(
+            memory_log_path,
+            epoch + 1,
+            "after_checkpoint",
+            device,
+            rank,
+            world_size,
+        )
+        if is_main:
+            with log_path.open("a", newline="", encoding="utf-8") as handle:
+                csv.writer(handle).writerow(
+                    [
+                        epoch + 1,
+                        averages["total"],
+                        averages["restoration"],
+                        averages["degradation"],
+                        averages["content"],
+                        averages["decorrelation"],
+                        averages["gate"],
+                        last_validation["psnr"],
+                        last_validation["bce"],
+                        last_validation["degradation_micro_f1"],
+                        last_validation["degradation_exact_match"],
+                        last_validation["gate_mean_abs"],
+                        optimizer.param_groups[0]["lr"],
+                        optimizer.param_groups[-1]["lr"],
+                        elapsed_minutes,
+                    ]
+                )
         if stop_for_time:
-            print(f"Reached the {args.max_minutes:.1f}-minute safety limit; checkpoint saved.")
+            if is_main:
+                print(
+                    f"Reached the {args.max_minutes:.1f}-minute safety limit; "
+                    "checkpoint saved."
+                )
             break
 
-    completed_epochs = epoch + 1 if "epoch" in locals() else start_epoch
-    _write_json(
-        output_dir / "run_summary.json",
-        {
-            "status": "time_limit" if stop_for_time else "completed",
-            "completed_epochs": completed_epochs,
-            "best_validation_psnr": best_psnr,
-            "elapsed_minutes": (time.monotonic() - started_at) / 60.0,
-            "model_type": args.model,
-            "preset": args.preset,
-            "parameters": parameter_counts,
-            "last_validation": last_validation,
-            "amp_requested": requested_amp,
-            "amp_used": use_amp,
-            "multi_gpu": isinstance(model, nn.DataParallel),
-            "gpu_peak_memory_mb": (
-                {
-                    str(index): torch.cuda.max_memory_allocated(index) / 1024**2
-                    for index in gpu_ids
-                }
-                if device.type == "cuda"
-                else {}
-            ),
-        },
+    local_peak = (
+        torch.cuda.max_memory_allocated(device) / 1024**2
+        if device.type == "cuda"
+        else 0.0
     )
-    print(f"Training complete. Best validation PSNR: {best_psnr:.4f} dB")
-    print(f"Artifacts: {output_dir}")
+    peak_tensor = torch.tensor([local_peak], dtype=torch.float64, device=device)
+    gathered_peaks = [torch.zeros_like(peak_tensor) for _ in range(world_size)]
+    if distributed:
+        dist.all_gather(gathered_peaks, peak_tensor)
+    else:
+        gathered_peaks[0].copy_(peak_tensor)
+    completed_epochs = epoch + 1 if "epoch" in locals() else start_epoch
+    if is_main:
+        _write_json(
+            output_dir / "run_summary.json",
+            {
+                "status": "time_limit" if stop_for_time else "completed",
+                "completed_epochs": completed_epochs,
+                "best_validation_psnr": best_psnr,
+                "elapsed_minutes": (time.monotonic() - started_at) / 60.0,
+                "model_type": args.model,
+                "preset": args.preset,
+                "parameters": parameter_counts,
+                "last_validation": last_validation,
+                "amp_requested": requested_amp,
+                "amp_used": use_amp,
+                "multi_gpu": distributed,
+                "parallel_strategy": "ddp" if distributed else "single_process",
+                "world_size": world_size,
+                "gpu_peak_memory_mb_by_rank": {
+                    str(index): value.item()
+                    for index, value in enumerate(gathered_peaks)
+                },
+            },
+        )
+        print(f"Training complete. Best validation PSNR: {best_psnr:.4f} dB")
+        print(f"Artifacts: {output_dir}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        if dist.is_available() and dist.is_initialized():
+            dist.destroy_process_group()
