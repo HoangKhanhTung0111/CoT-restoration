@@ -12,7 +12,8 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
 - `train_kaggle.py`: AMP training, same-scene paired views, content consistency,
   degradation supervision, adapter warm-up, checkpoint/resume, and experiment
   metadata.
-- `evaluate.py`: full CDD-11 evaluation using memory-safe tiled inference.
+- `evaluate.py`: full CDD-11 evaluation using full-frame inference by default,
+  with feathered tiles as a memory fallback.
 
 The research path uses the same spatial crop and augmentation for two different
 degradation views of one scene. Set `--content-weight 0` to disable this branch
@@ -95,8 +96,8 @@ For short calibration runs, add `--no-save-optimizer` to minimize host-memory
 pressure. In that mode `last.pt` can restore model weights and epoch number,
 but the optimizer/scheduler restart if the run is resumed.
 
-Evaluate the best checkpoint on validation while developing. Only one tile is
-held on the GPU at a time:
+Evaluate the best checkpoint on validation while developing. CDD-11 images fit
+comfortably as full frames on a T4:
 
 ```bash
 python -m hybrid_cot_nafnet.evaluate \
@@ -104,7 +105,7 @@ python -m hybrid_cot_nafnet.evaluate \
   --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
   --output-dir /kaggle/working/cot_nafnet_evaluation \
   --split validation \
-  --tile 256 --overlap 32 --num-workers 2
+  --tile 0 --num-workers 2
 ```
 
 Use `--split test` only after the experiment configuration is locked.
@@ -129,6 +130,8 @@ python -m torch.distributed.run --standalone --nproc_per_node 2 \
   --resume /kaggle/working/cot_nafnet_output/last.pt
 ```
 
-If a 256 crop still causes OOM because another notebook process holds GPU memory,
-restart the Kaggle session. As a fallback, use `--crop-size 192`; both 192 and
-256 are divisible by NAFNet's padding factor of 16.
+If a 256 training crop causes OOM because another notebook process holds GPU
+memory, restart the Kaggle session. As a training fallback, use
+`--crop-size 192`; both 192 and 256 are divisible by NAFNet's padding factor of
+16. CDD-11 evaluation should use `--tile 0`; for larger images that do not fit,
+use feathered inference such as `--tile 512 --overlap 64`.

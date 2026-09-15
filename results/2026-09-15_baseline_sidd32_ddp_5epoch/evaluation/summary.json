@@ -1,0 +1,115 @@
+{
+  "model_type": "baseline",
+  "preset": "sidd32",
+  "split": "validation",
+  "scene_ids": [
+    "00059",
+    "00065",
+    "00110",
+    "00122",
+    "00127"
+  ],
+  "val_fraction": 0.2,
+  "split_seed": 42,
+  "use_skip_gates": false,
+  "checkpoint": "/kaggle/working/experiments/calibration_baseline_sidd32_seed42_ddp/best.pt",
+  "samples": 55,
+  "amp_requested": true,
+  "amp_used": true,
+  "fp32_fallback": false,
+  "macro_input_psnr": 15.467022767836227,
+  "macro_input_ssim": 0.5628776786002246,
+  "macro_psnr": 18.6329807628465,
+  "macro_ssim": 0.6639361370693554,
+  "macro_delta_psnr": 3.165957995010274,
+  "macro_delta_ssim": 0.10105845846913075,
+  "degradation_micro_f1": null,
+  "degradation_exact_match": null,
+  "mean_latency_ms": 858.6380254545444,
+  "peak_gpu_memory_mb": 240.0341796875,
+  "parameters": {
+    "total": 29159715,
+    "adapter": 0,
+    "backbone": 29159715
+  },
+  "macs_256": 16045035520,
+  "per_type": {
+    "haze": {
+      "input_psnr": 14.640384120833668,
+      "input_ssim": 0.7664215803146363,
+      "psnr": 19.452819276390077,
+      "ssim": 0.8420007228851318,
+      "count": 5
+    },
+    "haze_rain": {
+      "input_psnr": 13.401998010982922,
+      "input_ssim": 0.6717651009559631,
+      "psnr": 18.005946046973857,
+      "ssim": 0.7294403672218323,
+      "count": 5
+    },
+    "haze_snow": {
+      "input_psnr": 14.043976179585774,
+      "input_ssim": 0.711787748336792,
+      "psnr": 18.636830163826886,
+      "ssim": 0.7965974450111389,
+      "count": 5
+    },
+    "low": {
+      "input_psnr": 11.923092609566925,
+      "input_ssim": 0.3104267418384552,
+      "psnr": 19.72149870174134,
+      "ssim": 0.6258451461791992,
+      "count": 5
+    },
+    "low_haze": {
+      "input_psnr": 14.29918204462877,
+      "input_ssim": 0.5035925149917603,
+      "psnr": 16.667895192921048,
+      "ssim": 0.6145904779434204,
+      "count": 5
+    },
+    "low_haze_rain": {
+      "input_psnr": 13.648278361474812,
+      "input_ssim": 0.40841263234615327,
+      "psnr": 16.452123688154806,
+      "ssim": 0.5013289332389832,
+      "count": 5
+    },
+    "low_haze_snow": {
+      "input_psnr": 12.664933634233533,
+      "input_ssim": 0.43281330466270446,
+      "psnr": 16.084795549691925,
+      "ssim": 0.5302480280399322,
+      "count": 5
+    },
+    "low_rain": {
+      "input_psnr": 14.064207246441963,
+      "input_ssim": 0.3826133370399475,
+      "psnr": 18.96441287025798,
+      "ssim": 0.5355280339717865,
+      "count": 5
+    },
+    "low_snow": {
+      "input_psnr": 13.660431821427085,
+      "input_ssim": 0.34437084197998047,
+      "psnr": 16.818346803057654,
+      "ssim": 0.535968029499054,
+      "count": 5
+    },
+    "rain": {
+      "input_psnr": 23.069326624065184,
+      "input_ssim": 0.7707821130752563,
+      "psnr": 22.184127975650323,
+      "ssim": 0.7535533785820008,
+      "count": 5
+    },
+    "snow": {
+      "input_psnr": 24.721439792957867,
+      "input_ssim": 0.8886685490608215,
+      "psnr": 21.973992122645633,
+      "ssim": 0.8381969451904296,
+      "count": 5
+    }
+  }
+}

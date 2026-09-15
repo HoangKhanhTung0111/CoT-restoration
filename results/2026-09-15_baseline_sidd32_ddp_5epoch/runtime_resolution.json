@@ -1,0 +1,11 @@
+{
+  "amp_requested": true,
+  "amp_used": true,
+  "multi_gpu": true,
+  "parallel_strategy": "ddp",
+  "world_size": 2,
+  "visible_cuda_devices": [
+    0,
+    1
+  ]
+}

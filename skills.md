@@ -43,7 +43,7 @@ Implement only **Strategy A: Lightweight CoT-inspired NAFNet (Single-Pass)**. St
   1. *Thinking:* Extract content/degradation embeddings with depthwise convolution and supervise a four-label vector (`low`, `haze`, `rain`, `snow`). Do not claim feature disentanglement without an explicit training constraint.
   2. *Planning:* Produce zero-initialized affine channel gates for the bottleneck and every encoder skip connection.
   3. *Action:* Restore the image with the standard NAFNet decoder in one forward pass.
-* **Efficiency constraint:** Keep the adapter below 0.5M parameters, use microbatching and tiled evaluation, and validate tensor shapes and dataset pairs before a long run.
+* **Efficiency constraint:** Keep the adapter below 0.5M parameters, use microbatching, and validate tensor shapes and dataset pairs before a long run. Use full-frame evaluation for CDD-11 to avoid tile seams; use feathered tiles only as a memory fallback for larger images.
 
 ---
 

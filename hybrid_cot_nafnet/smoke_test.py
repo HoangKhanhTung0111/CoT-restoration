@@ -9,9 +9,12 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
+import torch
 from PIL import Image
+from torch import nn
 
 from .datasets.cdd11 import CDD11_TYPES
+from .evaluate import tile_blend_window, tile_starts, tiled_inference
 
 
 def degrade(image: np.ndarray, degradation_type: str) -> np.ndarray:
@@ -48,8 +51,27 @@ def run(command, cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def check_tiled_inference() -> None:
+    """Check complete coverage, normalization, and complementary feathering."""
+    assert tile_starts(720, 256, 32) == [0, 155, 309, 464]
+    assert tile_starts(1080, 256, 32) == [0, 206, 412, 618, 824]
+
+    image = torch.rand(1, 3, 48, 56)
+    prediction, auxiliary = tiled_inference(
+        nn.Identity(), image, torch.device("cpu"), 32, 8, False
+    )
+    assert not auxiliary
+    assert torch.allclose(prediction, image, atol=1e-6)
+
+    left = tile_blend_window(32, 32, 8, 0, 0, 32, 56)[0, 0, 16, -8:]
+    right = tile_blend_window(32, 32, 8, 0, 24, 32, 56)[0, 0, 16, :8]
+    assert torch.allclose(left + right, torch.ones(8), atol=1e-6)
+    print("Feathered tile checks passed.")
+
+
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
+    check_tiled_inference()
     # Keep a stable ignored workspace: managed Windows sandboxes may lock
     # directories created through tempfile before nested files are written.
     temporary_root = Path(__file__).resolve().parent / "_smoke_workspace"

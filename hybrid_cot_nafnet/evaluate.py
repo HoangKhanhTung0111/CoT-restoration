@@ -47,8 +47,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--tile", type=int, default=256)
-    parser.add_argument("--overlap", type=int, default=32)
+    parser.add_argument(
+        "--tile",
+        type=int,
+        default=0,
+        help="Tile size; zero uses artifact-free full-frame inference (CDD-11 default).",
+    )
+    parser.add_argument(
+        "--overlap",
+        type=int,
+        default=32,
+        help="Minimum feathered overlap used only when --tile is positive.",
+    )
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--save-images", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
@@ -70,13 +80,48 @@ def amp_context(enabled: bool):
 def tile_starts(length: int, tile: int, overlap: int) -> List[int]:
     if length <= tile:
         return [0]
+    if overlap < 0:
+        raise ValueError("overlap must be non-negative")
     stride = tile - overlap
     if stride <= 0:
         raise ValueError("overlap must be smaller than tile")
-    starts = list(range(0, length - tile + 1, stride))
-    if starts[-1] != length - tile:
-        starts.append(length - tile)
-    return starts
+    extent = length - tile
+    interval_count = math.ceil(extent / stride)
+    # Even spacing avoids a nearly duplicated final tile and guarantees at
+    # least the requested overlap everywhere.
+    return [
+        round(index * extent / interval_count)
+        for index in range(interval_count + 1)
+    ]
+
+
+def tile_blend_window(
+    patch_height: int,
+    patch_width: int,
+    overlap: int,
+    top: int,
+    left: int,
+    image_height: int,
+    image_width: int,
+) -> Tensor:
+    """Cosine feather weights that suppress context-poor internal tile edges."""
+
+    def axis_weights(size: int, start: int, full_size: int) -> Tensor:
+        weights = torch.ones(size, dtype=torch.float32)
+        blend = min(overlap, size)
+        if blend == 0:
+            return weights
+        phase = (torch.arange(blend, dtype=torch.float32) + 0.5) / blend
+        ramp = torch.sin(phase * (math.pi / 2.0)).square()
+        if start > 0:
+            weights[:blend] = ramp
+        if start + size < full_size:
+            weights[-blend:] = ramp.flip(0)
+        return weights
+
+    vertical = axis_weights(patch_height, top, image_height)
+    horizontal = axis_weights(patch_width, left, image_width)
+    return (vertical[:, None] * horizontal[None, :])[None, None]
 
 
 @torch.inference_mode()
@@ -125,10 +170,21 @@ def tiled_inference(
                     prediction = model(patch_cpu.to(device, non_blocking=True))
             prediction = prediction.float().cpu()
             patch_h, patch_w = prediction.shape[-2:]
-            output[..., top : top + patch_h, left : left + patch_w] += prediction
-            weights[..., top : top + patch_h, left : left + patch_w] += 1.0
+            blend = tile_blend_window(
+                patch_h,
+                patch_w,
+                overlap,
+                top,
+                left,
+                height,
+                width,
+            )
+            output[..., top : top + patch_h, left : left + patch_w] += (
+                prediction * blend
+            )
+            weights[..., top : top + patch_h, left : left + patch_w] += blend
             tile_count += 1
-            del prediction
+            del prediction, blend
     auxiliary_output: Dict[str, Tensor] = {}
     if logits_sum is not None:
         auxiliary_output = {
@@ -221,6 +277,8 @@ def main() -> None:
     args = parse_args()
     if args.tile > 0 and args.tile % 16:
         raise ValueError("tile must be divisible by 16")
+    if args.overlap < 0 or (args.tile > 0 and args.overlap >= args.tile):
+        raise ValueError("overlap must be non-negative and smaller than tile")
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif args.allow_cpu:
@@ -392,6 +450,9 @@ def main() -> None:
         "amp_requested": requested_amp,
         "amp_used": use_amp,
         "fp32_fallback": fp32_fallback,
+        "inference_mode": "full_frame" if args.tile <= 0 else "feathered_tiles",
+        "tile": args.tile,
+        "overlap": args.overlap if args.tile > 0 else None,
         "macro_input_psnr": macro_input_psnr,
         "macro_input_ssim": macro_input_ssim,
         "macro_psnr": macro_psnr,

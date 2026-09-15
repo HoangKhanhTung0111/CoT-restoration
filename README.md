@@ -53,8 +53,9 @@ Training uses PyTorch `DistributedDataParallel` through `torchrun` when Kaggle
 exposes two T4 GPUs. Each process owns one fixed model replica, avoiding the
 host-memory leak observed when `DataParallel` rebuilt a SIDD32 replica every
 forward under Kaggle PyTorch 2.10. The notebook's logical batch 4 and
-microbatch 2 become batch 2 and microbatch 1 per GPU. Evaluation remains
-single-image tiled inference on one GPU.
+microbatch 2 become batch 2 and microbatch 1 per GPU. CDD-11 evaluation uses
+artifact-free full-frame inference on one GPU by default. Feathered tiled
+inference remains available as a memory fallback.
 
 Six ordered ablations are recorded in `configs/ablation_matrix.json`. After
 multiple runs, collect their saved JSON metrics with:

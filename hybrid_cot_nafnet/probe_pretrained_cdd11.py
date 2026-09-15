@@ -50,7 +50,12 @@ def parse_args() -> argparse.Namespace:
         choices=("gopro32", "gopro64", "sidd32", "sidd64"),
         default=("gopro32", "gopro64", "sidd32", "sidd64"),
     )
-    parser.add_argument("--tile", type=int, default=256)
+    parser.add_argument(
+        "--tile",
+        type=int,
+        default=0,
+        help="Tile size; zero uses artifact-free full-frame inference (CDD-11 default).",
+    )
     parser.add_argument("--overlap", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-samples", type=int, default=0)
@@ -110,6 +115,8 @@ def main() -> None:
     args = parse_args()
     if args.tile > 0 and args.tile % 16:
         raise ValueError("tile must be divisible by 16")
+    if args.overlap < 0 or (args.tile > 0 and args.overlap >= args.tile):
+        raise ValueError("overlap must be non-negative and smaller than tile")
     if args.max_saved_per_type < 0:
         raise ValueError("max-saved-per-type must be non-negative")
     if torch.cuda.is_available():
@@ -275,6 +282,11 @@ def main() -> None:
             "amp_requested": use_amp,
             "amp_used": preset_use_amp,
             "fp32_fallback": fp32_fallback,
+            "inference_mode": (
+                "full_frame" if args.tile <= 0 else "feathered_tiles"
+            ),
+            "tile": args.tile,
+            "overlap": args.overlap if args.tile > 0 else None,
             "saved_comparisons": int(sum(saved_per_type.values())),
             "macro_input_psnr": macro_input_psnr,
             "macro_input_ssim": macro_input_ssim,
