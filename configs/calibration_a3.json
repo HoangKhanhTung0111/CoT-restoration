@@ -1,0 +1,42 @@
+{
+  "description": "Five-epoch A3 degradation-supervision calibration on CDD-11-30.",
+  "control_note": "Matches A2 exactly except for degradation_weight=0.05, isolating multi-label degradation supervision.",
+  "shared": {
+    "model": "hybrid",
+    "preset": "sidd32",
+    "pretrained": "auto",
+    "adapter_hidden": 64,
+    "seed": 42,
+    "crop_size": 256,
+    "val_crop_size": 0,
+    "epochs": 5,
+    "max_minutes": 0,
+    "batch_size": 4,
+    "microbatch_size": 2,
+    "patches_per_image": 2,
+    "num_workers": 0,
+    "pin_memory": false,
+    "save_optimizer": false,
+    "learning_rate": 0.0002,
+    "backbone_lr_scale": 1.0,
+    "weight_decay": 0.001,
+    "fft_weight": 0.05,
+    "freeze_backbone_epochs": 0,
+    "amp": true,
+    "evaluation_tile": 0,
+    "evaluation_num_workers": 0,
+    "save_evaluation_images": true,
+    "save_comparisons": true,
+    "max_saved_per_type": 1
+  },
+  "runs": [
+    {
+      "name": "a3_degradation_supervision_sidd32_seed42_5ep",
+      "skip_gates": true,
+      "degradation_weight": 0.05,
+      "content_weight": 0.0,
+      "decorrelation_weight": 0.0,
+      "gate_weight": 0.0
+    }
+  ]
+}

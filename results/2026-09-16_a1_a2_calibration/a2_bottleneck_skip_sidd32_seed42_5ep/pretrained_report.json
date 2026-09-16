@@ -1,0 +1,10 @@
+{
+  "path": "/kaggle/input/datasets/hoangkhanhtung/nafnetmodel/NAFNet-SIDD-width32.pth",
+  "loaded": 664,
+  "available": 682,
+  "backbone_loaded": 664,
+  "backbone_available": 664,
+  "backbone_missing": 0,
+  "unexpected": 0,
+  "mismatched": 0
+}

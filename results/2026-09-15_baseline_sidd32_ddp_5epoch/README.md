@@ -26,4 +26,5 @@ archived tiled path to 28.78 dB with full-frame inference. CDD-11 evaluation is
 therefore changed to full-frame inference before the baseline is finalized.
 
 Large checkpoints and rendered images are intentionally excluded from Git.
-The original downloaded artifact is `my_folder.zip` in the local workspace.
+The original downloaded artifact is stored locally at
+`artifacts/kaggle_downloads/my_folder.zip`.

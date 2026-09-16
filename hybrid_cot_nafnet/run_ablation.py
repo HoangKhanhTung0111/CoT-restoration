@@ -162,6 +162,14 @@ def evaluation_command(
         "save_images",
         bool(run.get("save_evaluation_images", True)),
     )
+    _flag(
+        command,
+        "save_comparisons",
+        bool(run.get("save_comparisons", False)),
+    )
+    command.extend(
+        ("--max-saved-per-type", str(run.get("max_saved_per_type", 1)))
+    )
     _flag(command, "amp", bool(run.get("amp", True)))
     return command
 

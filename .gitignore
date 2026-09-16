@@ -2,23 +2,18 @@
 /NAFNet/
 /CoTIR/
 
+# Local raw downloads and generated packages. Keep only the directory guide.
+/artifacts/*
+!/artifacts/README.md
+
 # Generated or temporary artifacts
 /cot_nafnet_smoke_*/
-/hybrid_cot_nafnet/_smoke_workspace/
-/hybrid_cot_nafnet_mvp.zip
 **/__pycache__/
 *.py[cod]
 *.pt
 *.pth
 /experiments/
 /outputs/
-/22h05_14_09_2026_cdd11_probe/
-/23h15_14_09_2026_cdd11_probe/
-/validation_cdd11_probe_23h45_14_09_2026/
-/pretrained_cdd11_qualitative/
-/notebook977a6359c0.ipynb
-/my_folder.zip
-/4h30_15_09_2026/
 
 # Notebook/editor caches
 .ipynb_checkpoints/

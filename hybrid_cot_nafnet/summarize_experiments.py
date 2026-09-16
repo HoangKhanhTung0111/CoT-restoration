@@ -53,7 +53,9 @@ def experiment_rows(root: Path) -> Iterable[Dict[str, object]]:
         row: Dict[str, object] = {"run": directory.name}
         row.update(flatten("config", config))
         row.update(flatten("train", training))
-        row.update(flatten("test", evaluation))
+        # The evaluator can target validation or test. A neutral prefix avoids
+        # mislabelling development metrics as held-out test results.
+        row.update(flatten("evaluation", evaluation))
         yield row
 
 

@@ -15,7 +15,7 @@ from typing import Dict, List, Sequence, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
+from PIL import Image, ImageDraw
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
@@ -61,6 +61,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--save-images", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--save-comparisons",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Save labelled Input | Restored | Ground truth contact sheets.",
+    )
+    parser.add_argument("--max-saved-per-type", type=int, default=1)
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-cpu", action="store_true")
     return parser.parse_args()
@@ -241,7 +248,47 @@ def save_image(tensor: Tensor, path: Path) -> None:
         .numpy()
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(array, mode="RGB").save(path)
+    Image.fromarray(array).save(path)
+
+
+def tensor_to_pil(tensor: Tensor) -> Image.Image:
+    array = (
+        tensor[0]
+        .clamp(0, 1)
+        .mul(255.0)
+        .round()
+        .byte()
+        .permute(1, 2, 0)
+        .numpy()
+    )
+    return Image.fromarray(array)
+
+
+def save_comparison(
+    lq: Tensor,
+    prediction: Tensor,
+    gt: Tensor,
+    path: Path,
+    title: str,
+) -> None:
+    """Save an explicitly labelled input/output/target contact sheet."""
+    panels = [tensor_to_pil(item) for item in (lq, prediction, gt)]
+    labels = ("Input (degraded)", "Restored", "Ground truth")
+    header_height = 44
+    canvas = Image.new(
+        "RGB",
+        (sum(panel.width for panel in panels), panels[0].height + header_height),
+        color="white",
+    )
+    draw = ImageDraw.Draw(canvas)
+    draw.text((6, 5), title, fill="black")
+    left = 0
+    for panel, label in zip(panels, labels):
+        canvas.paste(panel, (left, header_height))
+        draw.text((left + 6, 25), label, fill="black")
+        left += panel.width
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path)
 
 
 @torch.inference_mode()
@@ -275,6 +322,8 @@ def estimate_conv_linear_macs(
 
 def main() -> None:
     args = parse_args()
+    if args.max_saved_per_type < 0:
+        raise ValueError("max-saved-per-type must be non-negative")
     if args.tile > 0 and args.tile % 16:
         raise ValueError("tile must be divisible by 16")
     if args.overlap < 0 or (args.tile > 0 and args.overlap >= args.tile):
@@ -340,6 +389,7 @@ def main() -> None:
     grouped: Dict[str, List[Tuple[float, float, float, float]]] = defaultdict(list)
     true_positive = false_positive = false_negative = exact_match = 0
     fp32_fallback = False
+    saved_per_type: Dict[str, int] = defaultdict(int)
 
     for index, batch in enumerate(loader, start=1):
         lq_cpu, gt_cpu = batch["lq"].float(), batch["gt"].float()
@@ -412,7 +462,24 @@ def main() -> None:
             row["gate_mean_abs"] = auxiliary["gate_mean_abs"].item()
         rows.append(row)
         if args.save_images:
-            save_image(prediction, output_dir / "images" / degradation_type / f"{scene_id}.png")
+            save_image(
+                prediction,
+                output_dir / "images" / degradation_type / f"{scene_id}.png",
+            )
+        if (
+            args.save_comparisons
+            and saved_per_type[degradation_type] < args.max_saved_per_type
+        ):
+            save_comparison(
+                lq_cpu,
+                prediction,
+                gt_cpu,
+                output_dir
+                / "comparisons"
+                / f"{degradation_type}_{scene_id}.png",
+                f"{model_type}/{preset} | {degradation_type}/{scene_id}",
+            )
+            saved_per_type[degradation_type] += 1
         print(
             f"[{index:03d}/{len(dataset)}] {degradation_type}/{scene_id} "
             f"PSNR={psnr:.3f} SSIM={ssim:.4f} time={latency_ms:.1f}ms"
@@ -459,6 +526,7 @@ def main() -> None:
         "macro_ssim": macro_ssim,
         "macro_delta_psnr": macro_psnr - macro_input_psnr,
         "macro_delta_ssim": macro_ssim - macro_input_ssim,
+        "saved_comparisons": int(sum(saved_per_type.values())),
         "degradation_micro_f1": (
             2 * true_positive / f1_denominator if f1_denominator else None
         ),

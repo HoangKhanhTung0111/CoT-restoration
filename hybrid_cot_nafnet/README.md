@@ -136,6 +136,22 @@ scale of 1.0. That keeps the backbone schedule aligned with A0 and makes skip
 gating the only difference between A1 and A2. Adapter-only warm-up remains a
 separate optimization ablation for longer experiments.
 
+After selecting A2 provisionally, run the isolated A3 degradation-supervision
+calibration with:
+
+```bash
+python -m hybrid_cot_nafnet.run_ablation \
+  --config configs/calibration_a3.json \
+  --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
+  --experiments-root /kaggle/working/experiments_a3 \
+  --nproc-per-node 2
+```
+
+The A3 evaluator also saves one labelled `Input | Restored | Ground truth`
+comparison per degradation category. Degradation F1 is meaningful for A3
+because its multi-label BCE weight is nonzero; it was only diagnostic noise in
+A1/A2.
+
 To resume an interrupted run, pass the last checkpoint and keep the same model
 configuration:
 

@@ -74,9 +74,12 @@ def check_tiled_inference() -> None:
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     check_tiled_inference()
-    # Keep a stable ignored workspace: managed Windows sandboxes may lock
-    # directories created through tempfile before nested files are written.
-    temporary_root = Path(__file__).resolve().parent / "_smoke_workspace"
+    # Keep a stable ignored workspace outside the source package: managed
+    # Windows sandboxes may lock tempfile directories before nested files are
+    # written.
+    temporary_root = (
+        project_root / "artifacts" / "local_smoke" / "smoke_workspace"
+    )
     temporary_root.mkdir(exist_ok=True)
     with nullcontext(temporary_root):
         data_root = temporary_root / "cdd"
@@ -136,6 +139,9 @@ def main() -> None:
                 "--num-workers",
                 "0",
                 "--no-save-images",
+                "--save-comparisons",
+                "--max-saved-per-type",
+                "1",
                 "--no-amp",
                 "--allow-cpu",
             ],
@@ -151,6 +157,10 @@ def main() -> None:
         assert manifest["validation_crop_size"] == 0
         assert training_summary["validation_protocol"] == "full_frame"
         assert summary["samples"] == len(CDD11_TYPES)
+        assert summary["saved_comparisons"] == len(CDD11_TYPES)
+        assert len(list((eval_output / "comparisons").glob("*.png"))) == len(
+            CDD11_TYPES
+        )
         assert np.isfinite(summary["macro_psnr"])
         assert np.isfinite(summary["macro_ssim"])
         print("End-to-end smoke test passed.")

@@ -20,10 +20,11 @@ We aim to combine two key ideas:
 ├── docs/ <-- Converted markdown papers (CoTIR, UIR, AnyIR)
 ├── NAFNet/ <-- Modified NAFNet repository (Kaggle-ready)
 ├── CoTIR/ <-- Official CoTIR repository
-├── notebook/ <-- NEW: Kaggle notebook references and outputs
-│   └── nafnet.ipynb <-- Previous successful NAFNet run. Reference this for Kaggle environment setup and cell execution order.
 ├── notebooks/
+│   ├── nafnet_baseline_reproduction.ipynb <-- Previous successful NAFNet reference run.
 │   └── kaggle_cot_nafnet.ipynb <-- Import this directly from GitHub; no per-cell copy/paste.
+├── results/ <-- Versioned lightweight metrics, logs and manifests
+├── artifacts/ <-- Local-only Kaggle ZIPs, images, packages and smoke outputs
 └── hybrid_cot_nafnet/ <-- NEW: Modules and integration scripts
     ├── modules/ <-- Custom CoT-Adapters / Gated Modules
     ├── datasets/ <-- Data Loaders for Composite Degradation
@@ -266,7 +267,7 @@ Before editing, testing, training, or changing Git state, give a realistic time
 range. Once approved, move to the next approved task as soon as the previous task
 finishes; never wait for the estimate to elapse.
 
-`notebook/nafnet.ipynb` benchmarks four pretrained models on partial GoPro/SIDD
+`notebooks/nafnet_baseline_reproduction.ipynb` benchmarks four pretrained models on partial GoPro/SIDD
 test data. It is not a NAFNet baseline result on CDD-11.
 
 When designing CoTAdapter, reference docs/CoTIR\_adapter\_summary.md for parameter equations. Multi-pass CoR inference is intentionally excluded from the approved research direction.

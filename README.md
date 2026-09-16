@@ -3,6 +3,21 @@
 Lightweight, single-pass composite image restoration using a checkpoint-compatible
 NAFNet backbone and a degradation-aware bottleneck/skip adapter.
 
+## Repository layout
+
+```text
+configs/             Reproducible experiment definitions
+docs/                Paper and design notes
+hybrid_cot_nafnet/   Training, evaluation, data and model code
+notebooks/           GitHub-importable Kaggle notebooks and baseline reference
+results/             Small verified metrics, logs and experiment manifests
+artifacts/           Ignored local Kaggle downloads, packages and smoke outputs
+NAFNet/, CoTIR/      Ignored upstream reference repositories
+```
+
+Raw ZIPs and generated images do not belong in the repository root or Git
+history. See `artifacts/README.md` for the local-only layout.
+
 ## Kaggle inputs
 
 The code uses the existing paths below without placeholders:
@@ -29,6 +44,11 @@ After finalizing A0, import
 [`notebooks/kaggle_ablation_a1_a2.ipynb`](https://github.com/HoangKhanhTung0111/CoT-restoration/blob/main/notebooks/kaggle_ablation_a1_a2.ipynb)
 to run the controlled five-epoch A1/A2 comparison. Its first Run All is a dry
 run; enable `RUN_ABLATIONS` only after checking the printed commands.
+
+A2 is the provisional architecture selected by that calibration. Import
+[`notebooks/kaggle_ablation_a3.ipynb`](https://github.com/HoangKhanhTung0111/CoT-restoration/blob/main/notebooks/kaggle_ablation_a3.ipynb)
+for the controlled A3 degradation-supervision run. It changes only the
+degradation loss weight from 0 to 0.05 and exports labelled qualitative panels.
 
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review

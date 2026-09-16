@@ -1,0 +1,31 @@
+{
+  "status": "completed",
+  "completed_epochs": 5,
+  "best_validation_psnr": 19.695650794289328,
+  "elapsed_minutes": 6.479281390516667,
+  "model_type": "hybrid",
+  "preset": "sidd32",
+  "parameters": {
+    "total": 29406823,
+    "adapter": 247108,
+    "backbone": 29159715
+  },
+  "validation_crop_size": 0,
+  "validation_protocol": "full_frame",
+  "last_validation": {
+    "psnr": 19.695650794289328,
+    "bce": 0.6929729439995506,
+    "degradation_micro_f1": 0.42105263157894735,
+    "degradation_exact_match": 0.12727272727272726,
+    "gate_mean_abs": 0.0025245319713245737
+  },
+  "amp_requested": true,
+  "amp_used": true,
+  "multi_gpu": true,
+  "parallel_strategy": "ddp",
+  "world_size": 2,
+  "gpu_peak_memory_mb_by_rank": {
+    "0": 1663.6142578125,
+    "1": 1663.6142578125
+  }
+}
