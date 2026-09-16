@@ -50,6 +50,12 @@ A2 is the provisional architecture selected by that calibration. Import
 for the controlled A3 degradation-supervision run. It changes only the
 degradation loss weight from 0 to 0.05 and exports labelled qualitative panels.
 
+A3 learned low/haze but did not produce positive rain/snow predictions. Import
+[`notebooks/kaggle_ablation_a3_long.ipynb`](https://github.com/HoangKhanhTung0111/CoT-restoration/blob/main/notebooks/kaggle_ablation_a3_long.ipynb)
+for the controlled A3-L duration diagnostic. It repeats A3 from scratch for 20
+epochs, logs per-label precision/recall/F1/AUROC/AP, and evaluates separate
+best-PSNR and best-macro-F1 checkpoints without touching the test split.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.

@@ -24,10 +24,14 @@ if __package__ in {None, ""}:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from hybrid_cot_nafnet.datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from hybrid_cot_nafnet.degradation_metrics import (
+        multilabel_degradation_metrics,
+    )
     from hybrid_cot_nafnet.model import build_model, count_parameters
     from hybrid_cot_nafnet.project_config import KAGGLE_CDD11_ROOT
 else:
     from .datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from .degradation_metrics import multilabel_degradation_metrics
     from .model import build_model, count_parameters
     from .project_config import KAGGLE_CDD11_ROOT
 
@@ -387,7 +391,8 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: List[Dict[str, object]] = []
     grouped: Dict[str, List[Tuple[float, float, float, float]]] = defaultdict(list)
-    true_positive = false_positive = false_negative = exact_match = 0
+    degradation_targets = []
+    degradation_probabilities = []
     fp32_fallback = False
     saved_per_type: Dict[str, int] = defaultdict(int)
 
@@ -451,11 +456,9 @@ def main() -> None:
             probabilities = auxiliary["degradation_logits"].sigmoid()[0]
             predicted_labels = probabilities >= 0.5
             target_labels = batch["label"][0] >= 0.5
-            true_positive += (predicted_labels & target_labels).sum().item()
-            false_positive += (predicted_labels & ~target_labels).sum().item()
-            false_negative += (~predicted_labels & target_labels).sum().item()
+            degradation_probabilities.append(probabilities.numpy())
+            degradation_targets.append(target_labels.numpy())
             is_exact = predicted_labels.eq(target_labels).all().item()
-            exact_match += int(is_exact)
             for name, probability in zip(DEGRADATIONS, probabilities.tolist()):
                 row[f"prob_{name}"] = probability
             row["degradation_exact_match"] = bool(is_exact)
@@ -503,7 +506,15 @@ def main() -> None:
     macro_input_ssim = float(
         np.mean([value["input_ssim"] for value in per_type.values()])
     )
-    f1_denominator = 2 * true_positive + false_positive + false_negative
+    degradation_metrics = (
+        multilabel_degradation_metrics(
+            np.stack(degradation_targets),
+            np.stack(degradation_probabilities),
+            DEGRADATIONS,
+        )
+        if degradation_targets
+        else None
+    )
     summary = {
         "model_type": model_type,
         "preset": preset,
@@ -528,10 +539,16 @@ def main() -> None:
         "macro_delta_ssim": macro_ssim - macro_input_ssim,
         "saved_comparisons": int(sum(saved_per_type.values())),
         "degradation_micro_f1": (
-            2 * true_positive / f1_denominator if f1_denominator else None
+            degradation_metrics["micro_f1"] if degradation_metrics else None
+        ),
+        "degradation_macro_f1": (
+            degradation_metrics["macro_f1"] if degradation_metrics else None
         ),
         "degradation_exact_match": (
-            exact_match / len(rows) if hasattr(model, "cot_adapter") else None
+            degradation_metrics["exact_match"] if degradation_metrics else None
+        ),
+        "degradation_per_label": (
+            degradation_metrics["per_label"] if degradation_metrics else None
         ),
         "mean_latency_ms": float(np.mean([row["latency_ms"] for row in rows])),
         "peak_gpu_memory_mb": (

@@ -152,6 +152,22 @@ comparison per degradation category. Degradation F1 is meaningful for A3
 because its multi-label BCE weight is nonzero; it was only diagnostic noise in
 A1/A2.
 
+The follow-up A3-L diagnostic keeps A3 unchanged and extends its schedule to 20
+epochs. It also evaluates the PSNR-selected and macro-F1-selected checkpoints:
+
+```bash
+python -m hybrid_cot_nafnet.run_ablation \
+  --config configs/calibration_a3_long.json \
+  --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
+  --experiments-root /kaggle/working/experiments_a3l \
+  --nproc-per-node 2
+```
+
+`best.pt` is selected by validation PSNR and `best_reasoning.pt` by degradation
+macro-F1. Training and final evaluation report per-label precision, recall, F1,
+AUROC, and average precision so frequent low/haze labels cannot hide failed
+rain/snow recognition.
+
 To resume an interrupted run, pass the last checkpoint and keep the same model
 configuration:
 

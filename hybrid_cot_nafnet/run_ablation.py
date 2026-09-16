@@ -138,18 +138,22 @@ def training_command(
 
 
 def evaluation_command(
-    run: Dict[str, object], data_root: Path, output_dir: Path
+    run: Dict[str, object],
+    data_root: Path,
+    output_dir: Path,
+    checkpoint_name: str = "best.pt",
+    evaluation_name: str = "evaluation",
 ) -> List[str]:
     command = [
         sys.executable,
         "-m",
         "hybrid_cot_nafnet.evaluate",
         "--checkpoint",
-        str(output_dir / "best.pt"),
+        str(output_dir / checkpoint_name),
         "--data-root",
         str(data_root),
         "--output-dir",
-        str(output_dir / "evaluation"),
+        str(output_dir / evaluation_name),
         "--split",
         "validation",
         "--tile",
@@ -198,6 +202,8 @@ def main() -> None:
     for run in runs:
         output_dir = experiments_root / str(run["name"])
         evaluation_summary = output_dir / "evaluation" / "summary.json"
+        evaluate_reasoning = bool(run.get("evaluate_reasoning_checkpoint", False))
+        reasoning_summary = output_dir / "reasoning_evaluation" / "summary.json"
         checkpoint = output_dir / "best.pt"
         training_summary = read_json_object(output_dir / "run_summary.json")
         if training_summary:
@@ -215,7 +221,10 @@ def main() -> None:
                     f"Unusable training summary at {output_dir}: status={status!r}, "
                     f"completed_epochs={completed_epochs}, expected={expected_epochs}"
                 )
-        if evaluation_summary.is_file():
+        evaluations_complete = evaluation_summary.is_file() and (
+            not evaluate_reasoning or reasoning_summary.is_file()
+        )
+        if evaluations_complete:
             if not training_summary:
                 raise RuntimeError(
                     f"Evaluation exists without a training summary at {output_dir}"
@@ -238,7 +247,25 @@ def main() -> None:
                     f"Training summary exists but best.pt is missing at {output_dir}"
                 )
             print(f"Using existing checkpoint: {checkpoint}")
-        run_checked(evaluation_command(run, data_root, output_dir), args.dry_run)
+        if not evaluation_summary.is_file():
+            run_checked(evaluation_command(run, data_root, output_dir), args.dry_run)
+        if evaluate_reasoning and not reasoning_summary.is_file():
+            reasoning_checkpoint = output_dir / "best_reasoning.pt"
+            if not args.dry_run and not reasoning_checkpoint.is_file():
+                raise RuntimeError(
+                    "Reasoning evaluation requested but checkpoint is missing: "
+                    f"{reasoning_checkpoint}"
+                )
+            run_checked(
+                evaluation_command(
+                    run,
+                    data_root,
+                    output_dir,
+                    checkpoint_name="best_reasoning.pt",
+                    evaluation_name="reasoning_evaluation",
+                ),
+                args.dry_run,
+            )
 
     summary_command = [
         sys.executable,

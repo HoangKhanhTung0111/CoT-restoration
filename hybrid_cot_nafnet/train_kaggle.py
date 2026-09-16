@@ -29,16 +29,43 @@ if __package__ in {None, ""}:
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from hybrid_cot_nafnet.datasets import CDD11Dataset, find_cdd11_root
+    from hybrid_cot_nafnet.datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from hybrid_cot_nafnet.degradation_metrics import (
+        flattened_degradation_metrics,
+        multilabel_degradation_metrics,
+    )
     from hybrid_cot_nafnet.model import build_model, count_parameters
     from hybrid_cot_nafnet.project_config import (
         KAGGLE_CDD11_ROOT,
         pretrained_path_for_preset,
     )
 else:
-    from .datasets import CDD11Dataset, find_cdd11_root
+    from .datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from .degradation_metrics import (
+        flattened_degradation_metrics,
+        multilabel_degradation_metrics,
+    )
     from .model import build_model, count_parameters
     from .project_config import KAGGLE_CDD11_ROOT, pretrained_path_for_preset
+
+
+DEGRADATION_DETAIL_METRICS = (
+    "precision",
+    "recall",
+    "f1",
+    "auroc",
+    "average_precision",
+)
+DEGRADATION_VALIDATION_KEYS = (
+    "degradation_micro_f1",
+    "degradation_macro_f1",
+    "degradation_exact_match",
+    *(
+        f"degradation_{label}_{metric}"
+        for label in DEGRADATIONS
+        for metric in DEGRADATION_DETAIL_METRICS
+    ),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -326,9 +353,10 @@ def validate(
     psnr_sum = 0.0
     bce_sum = 0.0
     sample_count = 0
-    true_positive = false_positive = false_negative = exact = 0
     label_count = 0
     gate_sum = 0.0
+    degradation_targets = []
+    degradation_probabilities = []
     for batch in loader:
         lq = batch["lq"].to(device, non_blocking=True)
         gt = batch["gt"].to(device, non_blocking=True)
@@ -339,12 +367,10 @@ def validate(
                 bce = F.binary_cross_entropy_with_logits(
                     auxiliary["degradation_logits"].float(), labels.float()
                 )
-                predicted_labels = auxiliary["degradation_logits"].sigmoid() >= 0.5
-                target_labels = labels >= 0.5
-                true_positive += (predicted_labels & target_labels).sum().item()
-                false_positive += (predicted_labels & ~target_labels).sum().item()
-                false_negative += (~predicted_labels & target_labels).sum().item()
-                exact += predicted_labels.eq(target_labels).all(dim=1).sum().item()
+                degradation_probabilities.append(
+                    auxiliary["degradation_logits"].sigmoid().float().cpu().numpy()
+                )
+                degradation_targets.append(labels.float().cpu().numpy())
                 label_count += labels.numel()
                 gate_sum += auxiliary["gate_mean_abs"].float().mean().item() * lq.shape[0]
             else:
@@ -354,16 +380,21 @@ def validate(
         bce_sum += bce.item() * lq.shape[0]
         sample_count += lq.shape[0]
     model.train()
-    denominator = 2 * true_positive + false_positive + false_negative
-    return {
+    result = {
         "psnr": psnr_sum / sample_count,
         "bce": bce_sum / sample_count,
-        "degradation_micro_f1": (
-            2 * true_positive / denominator if denominator else 0.0
-        ),
-        "degradation_exact_match": exact / sample_count if label_count else 0.0,
         "gate_mean_abs": gate_sum / sample_count if label_count else 0.0,
     }
+    if degradation_targets:
+        detailed = multilabel_degradation_metrics(
+            np.concatenate(degradation_targets),
+            np.concatenate(degradation_probabilities),
+            DEGRADATIONS,
+        )
+        result.update(flattened_degradation_metrics(detailed))
+    else:
+        result.update({key: 0.0 for key in DEGRADATION_VALIDATION_KEYS})
+    return result
 
 
 def atomic_save(payload: dict, path: Path) -> None:
@@ -372,7 +403,16 @@ def atomic_save(payload: dict, path: Path) -> None:
     os.replace(temporary, path)
 
 
-def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, args):
+def checkpoint_payload(
+    model,
+    optimizer,
+    scheduler,
+    scaler,
+    epoch,
+    best_psnr,
+    best_degradation_macro_f1,
+    args,
+):
     return {
         "format_version": 2,
         "model": unwrap_model(model).state_dict(),
@@ -381,6 +421,7 @@ def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, ar
         "scaler": scaler.state_dict(),
         "epoch": epoch,
         "best_psnr": best_psnr,
+        "best_degradation_macro_f1": best_degradation_macro_f1,
         "model_type": args.model,
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
@@ -389,13 +430,17 @@ def checkpoint_payload(model, optimizer, scheduler, scaler, epoch, best_psnr, ar
     }
 
 
-def model_only_checkpoint_payload(model, epoch, best_psnr, args):
+def model_only_checkpoint_payload(
+    model, epoch, best_psnr, best_degradation_macro_f1, args, selection_metric
+):
     """Small evaluation checkpoint; use `last.pt` when optimizer resume is needed."""
     return {
         "format_version": 2,
         "model": unwrap_model(model).state_dict(),
         "epoch": epoch,
         "best_psnr": best_psnr,
+        "best_degradation_macro_f1": best_degradation_macro_f1,
+        "selection_metric": selection_metric,
         "model_type": args.model,
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
@@ -731,7 +776,11 @@ def main() -> None:
         optimizer, T_max=max(1, args.epochs), eta_min=1e-7
     )
     scaler = make_grad_scaler(use_amp)
-    start_epoch, best_psnr = 0, -float("inf")
+    start_epoch = 0
+    best_psnr = -float("inf")
+    best_degradation_macro_f1 = -float("inf")
+    best_psnr_epoch = 0
+    best_reasoning_epoch = 0
     if args.resume:
         resume = load_torch_file(args.resume)
         model.load_state_dict(extract_state_dict(resume), strict=True)
@@ -748,6 +797,11 @@ def main() -> None:
                 )
         start_epoch = int(resume["epoch"]) + 1
         best_psnr = float(resume.get("best_psnr", best_psnr))
+        best_degradation_macro_f1 = float(
+            resume.get(
+                "best_degradation_macro_f1", best_degradation_macro_f1
+            )
+        )
         if is_main:
             print(f"Resumed from epoch {start_epoch}")
 
@@ -832,8 +886,9 @@ def main() -> None:
                 [
                     "epoch", "train_total", "train_restoration",
                     "train_degradation", "train_content", "train_decorrelation",
-                    "train_gate", "val_psnr", "val_bce", "val_degradation_micro_f1",
-                    "val_degradation_exact_match", "val_gate_mean_abs",
+                    "train_gate", "val_psnr", "val_bce",
+                    *[f"val_{key}" for key in DEGRADATION_VALIDATION_KEYS],
+                    "val_gate_mean_abs",
                     "backbone_lr", "adapter_lr", "minutes",
                 ]
             )
@@ -848,6 +903,9 @@ def main() -> None:
     started_at = time.monotonic()
     stop_for_time = False
     last_validation: Dict[str, float] = {}
+    reasoning_checkpoint_enabled = (
+        has_cot_adapter(model) and args.degradation_weight > 0
+    )
     for epoch in range(start_epoch, args.epochs):
         backbone_trainable = not (
             has_cot_adapter(model) and epoch < args.freeze_backbone_epochs
@@ -1036,8 +1094,7 @@ def main() -> None:
         metric_keys = (
             "psnr",
             "bce",
-            "degradation_micro_f1",
-            "degradation_exact_match",
+            *DEGRADATION_VALIDATION_KEYS,
             "gate_mean_abs",
         )
         metric_tensor = torch.tensor(
@@ -1060,6 +1117,14 @@ def main() -> None:
             world_size,
         )
         val_psnr = last_validation["psnr"]
+        val_macro_f1 = last_validation["degradation_macro_f1"]
+        psnr_improved = val_psnr > best_psnr
+        reasoning_improved = (
+            reasoning_checkpoint_enabled
+            and val_macro_f1 > best_degradation_macro_f1
+        )
+        next_best_psnr = max(best_psnr, val_psnr)
+        next_best_macro_f1 = max(best_degradation_macro_f1, val_macro_f1)
         averages = {key: value / reduced_steps for key, value in reduced_totals.items()}
         elapsed_minutes = (time.monotonic() - started_at) / 60.0
         if is_main:
@@ -1067,6 +1132,7 @@ def main() -> None:
                 f"epoch {epoch+1:03d}: val_psnr={val_psnr:.4f} "
                 f"val_bce={last_validation['bce']:.4f} "
                 f"val_f1={last_validation['degradation_micro_f1']:.4f} "
+                f"macro_f1={last_validation['degradation_macro_f1']:.4f} "
                 f"exact={last_validation['degradation_exact_match']:.4f}"
             )
             if args.save_optimizer:
@@ -1076,24 +1142,53 @@ def main() -> None:
                     scheduler,
                     scaler,
                     epoch,
-                    max(best_psnr, val_psnr),
+                    next_best_psnr,
+                    next_best_macro_f1,
                     args,
                 )
             else:
                 payload = model_only_checkpoint_payload(
-                    model, epoch, max(best_psnr, val_psnr), args
+                    model,
+                    epoch,
+                    next_best_psnr,
+                    next_best_macro_f1,
+                    args,
+                    "last",
                 )
             atomic_save(payload, output_dir / "last.pt")
-            if val_psnr > best_psnr:
+            if psnr_improved:
                 atomic_save(
-                    model_only_checkpoint_payload(model, epoch, val_psnr, args),
+                    model_only_checkpoint_payload(
+                        model,
+                        epoch,
+                        next_best_psnr,
+                        next_best_macro_f1,
+                        args,
+                        "validation_psnr",
+                    ),
                     output_dir / "best.pt",
+                )
+            if reasoning_improved:
+                atomic_save(
+                    model_only_checkpoint_payload(
+                        model,
+                        epoch,
+                        next_best_psnr,
+                        next_best_macro_f1,
+                        args,
+                        "degradation_macro_f1",
+                    ),
+                    output_dir / "best_reasoning.pt",
                 )
             if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
                 atomic_save(payload, output_dir / f"epoch_{epoch+1:03d}.pt")
             del payload
-        if val_psnr > best_psnr:
+        if psnr_improved:
             best_psnr = val_psnr
+            best_psnr_epoch = epoch + 1
+        if reasoning_improved:
+            best_degradation_macro_f1 = val_macro_f1
+            best_reasoning_epoch = epoch + 1
         gc.collect()
         if distributed:
             dist.barrier()
@@ -1118,8 +1213,10 @@ def main() -> None:
                         averages["gate"],
                         last_validation["psnr"],
                         last_validation["bce"],
-                        last_validation["degradation_micro_f1"],
-                        last_validation["degradation_exact_match"],
+                        *[
+                            last_validation.get(key, 0.0)
+                            for key in DEGRADATION_VALIDATION_KEYS
+                        ],
                         last_validation["gate_mean_abs"],
                         optimizer.param_groups[0]["lr"],
                         optimizer.param_groups[-1]["lr"],
@@ -1153,6 +1250,15 @@ def main() -> None:
                 "status": "time_limit" if stop_for_time else "completed",
                 "completed_epochs": completed_epochs,
                 "best_validation_psnr": best_psnr,
+                "best_validation_psnr_epoch": best_psnr_epoch,
+                "best_degradation_macro_f1": (
+                    best_degradation_macro_f1
+                    if reasoning_checkpoint_enabled
+                    else None
+                ),
+                "best_degradation_macro_f1_epoch": (
+                    best_reasoning_epoch if reasoning_checkpoint_enabled else None
+                ),
                 "elapsed_minutes": (time.monotonic() - started_at) / 60.0,
                 "model_type": args.model,
                 "preset": args.preset,
@@ -1174,6 +1280,11 @@ def main() -> None:
             },
         )
         print(f"Training complete. Best validation PSNR: {best_psnr:.4f} dB")
+        if reasoning_checkpoint_enabled:
+            print(
+                "Best degradation macro-F1: "
+                f"{best_degradation_macro_f1:.4f}"
+            )
         print(f"Artifacts: {output_dir}")
 
 

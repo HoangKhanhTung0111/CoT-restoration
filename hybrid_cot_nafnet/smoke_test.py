@@ -14,6 +14,7 @@ from PIL import Image
 from torch import nn
 
 from .datasets.cdd11 import CDD11_TYPES
+from .degradation_metrics import multilabel_degradation_metrics
 from .evaluate import tile_blend_window, tile_starts, tiled_inference
 
 
@@ -71,14 +72,31 @@ def check_tiled_inference() -> None:
     print("Feathered tile checks passed.")
 
 
+def check_degradation_metrics() -> None:
+    targets = np.asarray([[1, 0], [0, 1], [1, 1]], dtype=np.float32)
+    probabilities = np.asarray(
+        [[0.9, 0.1], [0.2, 0.8], [0.7, 0.6]], dtype=np.float32
+    )
+    metrics = multilabel_degradation_metrics(
+        targets, probabilities, ("first", "second")
+    )
+    assert metrics["micro_f1"] == 1.0
+    assert metrics["macro_f1"] == 1.0
+    assert metrics["exact_match"] == 1.0
+    assert metrics["per_label"]["first"]["auroc"] == 1.0
+    assert metrics["per_label"]["second"]["average_precision"] == 1.0
+    print("Degradation metric checks passed.")
+
+
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     check_tiled_inference()
+    check_degradation_metrics()
     # Keep a stable ignored workspace outside the source package: managed
     # Windows sandboxes may lock tempfile directories before nested files are
     # written.
     temporary_root = (
-        project_root / "artifacts" / "local_smoke" / "smoke_workspace"
+        project_root / "artifacts" / "local_smoke" / "smoke_workspace_metrics_v2"
     )
     temporary_root.mkdir(exist_ok=True)
     with nullcontext(temporary_root):
@@ -156,6 +174,8 @@ def main() -> None:
         assert manifest["train_crop_size"] == 16
         assert manifest["validation_crop_size"] == 0
         assert training_summary["validation_protocol"] == "full_frame"
+        assert (train_output / "best_reasoning.pt").is_file()
+        assert np.isfinite(training_summary["best_degradation_macro_f1"])
         assert summary["samples"] == len(CDD11_TYPES)
         assert summary["saved_comparisons"] == len(CDD11_TYPES)
         assert len(list((eval_output / "comparisons").glob("*.png"))) == len(
@@ -163,6 +183,10 @@ def main() -> None:
         )
         assert np.isfinite(summary["macro_psnr"])
         assert np.isfinite(summary["macro_ssim"])
+        assert np.isfinite(summary["degradation_macro_f1"])
+        assert set(summary["degradation_per_label"]) == {
+            "low", "haze", "rain", "snow"
+        }
         print("End-to-end smoke test passed.")
 
 

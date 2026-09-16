@@ -1,0 +1,33 @@
+{
+  "run": "a3_degradation_supervision_sidd32_seed42_5ep",
+  "commit": "67f758f300561a102b23fcc6069f103bf03c1269",
+  "status": "completed",
+  "epochs": 5,
+  "elapsed_minutes": 6.505354059866666,
+  "validation_samples": 55,
+  "validation_scenes": 5,
+  "macro_psnr": 19.641486498608423,
+  "macro_ssim": 0.6796120394359936,
+  "a3_minus_a2_psnr": -0.13140049204898224,
+  "a3_minus_a2_ssim": 0.004670857841318307,
+  "degradation_bce": 0.5766370339827104,
+  "degradation_micro_f1": 0.591715976331361,
+  "degradation_macro_f1": 0.38711288711288716,
+  "degradation_exact_match": 0.10909090909090909,
+  "per_label_f1": {
+    "low": 0.7792207792207793,
+    "haze": 0.7692307692307693,
+    "rain": 0.0,
+    "snow": 0.0
+  },
+  "per_label_auroc": {
+    "low": 0.9573333333333334,
+    "haze": 0.9013333333333333,
+    "rain": 0.6642857142857144,
+    "snow": 0.4757142857142857
+  },
+  "source_artifacts": [
+    "artifacts/kaggle_downloads/A3/a3_lightweight_results.zip",
+    "artifacts/kaggle_downloads/A3/a3_comparisons.zip"
+  ]
+}
