@@ -56,6 +56,15 @@ for the controlled A3-L duration diagnostic. It repeats A3 from scratch for 20
 epochs, logs per-label precision/recall/F1/AUROC/AP, and evaluates separate
 best-PSNR and best-macro-F1 checkpoints without touching the test split.
 
+A3-L completed 20 epochs but still failed to predict snow at threshold 0.5.
+The next step is the matched 20-epoch A0-L/A2-L comparison in
+[`notebooks/kaggle_ablation_controls_long.ipynb`](notebooks/kaggle_ablation_controls_long.ipynb),
+using [`configs/calibration_controls_long.json`](configs/calibration_controls_long.json).
+It runs baseline and adapter/skip-gate controls sequentially on two T4 GPUs,
+with auxiliary losses disabled and only best-PSNR validation evaluation.
+See the [A3-L report](results/2026-09-17_a3_long/README.md) for the evidence and
+comparison protocol. A4 remains deferred pending successful reasoning.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
