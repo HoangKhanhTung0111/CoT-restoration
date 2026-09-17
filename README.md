@@ -72,6 +72,12 @@ from GitHub. It fuses degradation evidence from all encoder scales and balances
 the four-label BCE using only train-split frequencies. If A3-M still fails the
 reasoning/restoration gates, stop this degradation-reasoning branch.
 
+A3-M completed the planned attempt. It raised macro-F1 to 0.759 and removed
+zero-F1 labels, but snow AUROC remained 0.592 and restoration stayed below the
+matched A0-L baseline by 0.068 dB. The current one-pass degradation-reasoning
+branch is therefore stopped; A4/A5 are not justified. See the
+[A3-M report](results/2026-09-17_a3_multiscale/README.md).
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
