@@ -142,6 +142,18 @@ def parse_args() -> argparse.Namespace:
         "--skip-gates", action=argparse.BooleanOptionalAction, default=True
     )
     parser.add_argument(
+        "--multi-scale-degradation",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Build the degradation descriptor from all encoder scales.",
+    )
+    parser.add_argument(
+        "--balanced-degradation-loss",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Weight each degradation label by its training-set negative/positive ratio.",
+    )
+    parser.add_argument(
         "--multi-gpu",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -426,6 +438,7 @@ def checkpoint_payload(
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
         "use_skip_gates": args.skip_gates,
+        "use_multiscale_degradation": args.multi_scale_degradation,
         "args": vars(args),
     }
 
@@ -445,6 +458,7 @@ def model_only_checkpoint_payload(
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
         "use_skip_gates": args.skip_gates,
+        "use_multiscale_degradation": args.multi_scale_degradation,
         "args": vars(args),
     }
 
@@ -646,6 +660,14 @@ def main() -> None:
         augment=True,
         paired_view=args.model == "hybrid" and args.content_weight > 0,
     )
+    degradation_pos_weight = None
+    if args.balanced_degradation_loss:
+        label_matrix = torch.stack([sample[2] for sample in train_set.samples]).float()
+        positives = label_matrix.sum(dim=0)
+        negatives = label_matrix.shape[0] - positives
+        if torch.any(positives == 0):
+            raise RuntimeError("Balanced degradation loss requires every label in training")
+        degradation_pos_weight = (negatives / positives).to(device)
     val_set = CDD11Dataset(
         data_root,
         mode="val",
@@ -676,6 +698,11 @@ def main() -> None:
                 "test_samples": len(test_probe),
                 "train_crop_size": args.crop_size,
                 "validation_crop_size": args.val_crop_size,
+                "degradation_pos_weight": (
+                    degradation_pos_weight.cpu().tolist()
+                    if degradation_pos_weight is not None
+                    else None
+                ),
             },
         )
     global_sample_count = len(train_set) * max(1, args.patches_per_image)
@@ -705,6 +732,7 @@ def main() -> None:
         args.preset,
         args.adapter_hidden,
         use_skip_gates=args.skip_gates,
+        use_multiscale_degradation=args.multi_scale_degradation,
     ).to(device)
     parameter_counts = count_parameters(model)
     if is_main:
@@ -968,6 +996,7 @@ def main() -> None:
                                 degradation = F.binary_cross_entropy_with_logits(
                                     auxiliary["degradation_logits"].float(),
                                     labels.float(),
+                                    pos_weight=degradation_pos_weight,
                                 )
                             else:
                                 prediction = model(lq)

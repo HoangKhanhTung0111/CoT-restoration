@@ -168,6 +168,21 @@ macro-F1. Training and final evaluation report per-label precision, recall, F1,
 AUROC, and average precision so frequent low/haze labels cannot hide failed
 rain/snow recognition.
 
+A3-M is the single multiscale follow-up after the matched 20-epoch controls.
+It uses encoder skip statistics for degradation recognition and computes BCE
+positive weights from the training split:
+
+```bash
+python -m hybrid_cot_nafnet.run_ablation \
+  --config configs/calibration_a3_multiscale.json \
+  --data-root /kaggle/input/datasets/mintesnotfikir/cdd-11-30 \
+  --experiments-root /kaggle/working/experiments_a3m \
+  --nproc-per-node 2
+```
+
+Legacy checkpoints remain compatible because multiscale reasoning is disabled
+unless the checkpoint/config explicitly enables it.
+
 To resume an interrupted run, pass the last checkpoint and keep the same model
 configuration:
 

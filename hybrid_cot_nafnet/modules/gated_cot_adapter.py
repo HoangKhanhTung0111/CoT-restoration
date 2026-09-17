@@ -60,6 +60,7 @@ class GatedCoTAdapter(nn.Module):
         num_degradations: int = 4,
         modulation_limit: float = 0.1,
         use_skip_gates: bool = True,
+        use_multiscale_degradation: bool = False,
     ) -> None:
         super().__init__()
         if hidden_channels < 4:
@@ -69,6 +70,7 @@ class GatedCoTAdapter(nn.Module):
         self.hidden_channels = int(hidden_channels)
         self.modulation_limit = float(modulation_limit)
         self.use_skip_gates = bool(use_skip_gates)
+        self.use_multiscale_degradation = bool(use_multiscale_degradation)
 
         self.norm = LayerNorm2d(self.bottleneck_channels)
         self.local_features = nn.Sequential(
@@ -84,6 +86,29 @@ class GatedCoTAdapter(nn.Module):
         )
         self.content_projection = nn.Conv2d(hidden_channels, hidden_channels, 1)
         self.degradation_projection = nn.Conv2d(hidden_channels, hidden_channels, 1)
+        if self.use_multiscale_degradation:
+            self.degradation_pyramid = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        LayerNorm2d(channels),
+                        nn.Conv2d(channels, 2 * hidden_channels, 1),
+                        nn.Conv2d(
+                            2 * hidden_channels,
+                            2 * hidden_channels,
+                            3,
+                            padding=1,
+                            groups=2 * hidden_channels,
+                        ),
+                        SimpleGate(),
+                    )
+                    for channels in self.skip_channels
+                ]
+            )
+            descriptor_channels = hidden_channels * (1 + 2 * len(self.skip_channels))
+            self.degradation_fusion = nn.Sequential(
+                nn.Linear(descriptor_channels, 2 * hidden_channels),
+                _VectorSimpleGate(),
+            )
         self.degradation_head = nn.Linear(hidden_channels, num_degradations)
 
         self.planner = nn.Sequential(
@@ -130,6 +155,24 @@ class GatedCoTAdapter(nn.Module):
         degradation_map = self.degradation_projection(local)
         content_embedding = self._pool(content_map)
         degradation_embedding = self._pool(degradation_map)
+        if self.use_multiscale_degradation:
+            descriptors = [degradation_embedding]
+            for projector, skip in zip(self.degradation_pyramid, skips):
+                feature = projector(skip)
+                descriptors.extend(
+                    (
+                        self._pool(feature),
+                        feature.float()
+                        .square()
+                        .mean(dim=(-2, -1))
+                        .add(1e-8)
+                        .sqrt()
+                        .to(feature.dtype),
+                    )
+                )
+            degradation_embedding = self.degradation_fusion(
+                torch.cat(descriptors, dim=1)
+            )
         degradation_logits = self.degradation_head(degradation_embedding)
 
         plan = self.planner(degradation_embedding)

@@ -347,8 +347,15 @@ def main() -> None:
     preset = checkpoint.get("preset", "nafnet32")
     adapter_hidden = int(checkpoint.get("adapter_hidden", 64))
     use_skip_gates = bool(checkpoint.get("use_skip_gates", True))
+    use_multiscale_degradation = bool(
+        checkpoint.get("use_multiscale_degradation", False)
+    )
     model = build_model(
-        model_type, preset, adapter_hidden, use_skip_gates=use_skip_gates
+        model_type,
+        preset,
+        adapter_hidden,
+        use_skip_gates=use_skip_gates,
+        use_multiscale_degradation=use_multiscale_degradation,
     )
     model.load_state_dict(checkpoint["model"], strict=True)
     model.to(device).eval()
@@ -523,6 +530,7 @@ def main() -> None:
         "val_fraction": args.val_fraction if args.split == "validation" else None,
         "split_seed": args.seed if args.split == "validation" else None,
         "use_skip_gates": use_skip_gates,
+        "use_multiscale_degradation": use_multiscale_degradation,
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "samples": len(rows),
         "amp_requested": requested_amp,

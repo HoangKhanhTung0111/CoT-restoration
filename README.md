@@ -65,6 +65,13 @@ with auxiliary losses disabled and only best-PSNR validation evaluation.
 See the [A3-L report](results/2026-09-17_a3_long/README.md) for the evidence and
 comparison protocol. A4 remains deferred pending successful reasoning.
 
+The matched controls show no restoration benefit from A2-L or A3-L. The single
+planned architecture rescue is A3-M: import
+[`notebooks/kaggle_ablation_a3_multiscale.ipynb`](notebooks/kaggle_ablation_a3_multiscale.ipynb)
+from GitHub. It fuses degradation evidence from all encoder scales and balances
+the four-label BCE using only train-split frequencies. If A3-M still fails the
+reasoning/restoration gates, stop this degradation-reasoning branch.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.

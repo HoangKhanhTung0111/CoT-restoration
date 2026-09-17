@@ -158,7 +158,11 @@ class CoTNAFNet(NAFNet):
     """NAFNet with one bottleneck reasoner and gates on every skip level."""
 
     def __init__(
-        self, adapter_hidden: int = 64, use_skip_gates: bool = True, **kwargs
+        self,
+        adapter_hidden: int = 64,
+        use_skip_gates: bool = True,
+        use_multiscale_degradation: bool = False,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         width = int(kwargs.get("width", 32))
@@ -170,6 +174,7 @@ class CoTNAFNet(NAFNet):
             hidden_channels=adapter_hidden,
             num_degradations=4,
             use_skip_gates=use_skip_gates,
+            use_multiscale_degradation=use_multiscale_degradation,
         )
 
     def forward(self, inp: Tensor, return_aux: bool = False):
@@ -211,6 +216,7 @@ def build_model(
     preset: str = "nafnet32",
     adapter_hidden: int = 64,
     use_skip_gates: bool = True,
+    use_multiscale_degradation: bool = False,
 ) -> nn.Module:
     if preset not in PRESETS:
         raise KeyError(f"Unknown preset {preset!r}; choose from {sorted(PRESETS)}")
@@ -228,6 +234,7 @@ def build_model(
         return CoTNAFNet(
             adapter_hidden=adapter_hidden,
             use_skip_gates=use_skip_gates,
+            use_multiscale_degradation=use_multiscale_degradation,
             **kwargs,
         )
     raise KeyError("model_type must be 'baseline' or 'hybrid'")

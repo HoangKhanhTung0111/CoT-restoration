@@ -129,6 +129,16 @@ def training_command(
     for key in required:
         command.extend((f"--{key.replace('_', '-')}", str(run[key])))
     _flag(command, "skip_gates", bool(run.get("skip_gates", True)))
+    _flag(
+        command,
+        "multi_scale_degradation",
+        bool(run.get("multi_scale_degradation", False)),
+    )
+    _flag(
+        command,
+        "balanced_degradation_loss",
+        bool(run.get("balanced_degradation_loss", False)),
+    )
     _flag(command, "multi_gpu", nproc > 1)
     _flag(command, "pin_memory", bool(run.get("pin_memory", False)))
     _flag(command, "save_optimizer", bool(run.get("save_optimizer", False)))

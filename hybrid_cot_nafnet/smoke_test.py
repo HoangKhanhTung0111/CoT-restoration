@@ -134,6 +134,8 @@ def main() -> None:
                 "--no-save-optimizer",
                 "--fft-weight",
                 "0",
+                "--multi-scale-degradation",
+                "--balanced-degradation-loss",
                 "--no-amp",
                 "--allow-cpu",
             ],
