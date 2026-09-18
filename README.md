@@ -98,6 +98,13 @@ fixed residual strength, and the privileged 32x32 oracle ceiling. The pilot
 failed all five prespecified gates: see the
 [gain-predictor report](results/2026-09-18_gain_predictor/README.md).
 
+The same notebook now performs the prespecified follow-up ranking diagnostic
+without changing either learned model. Within each validation image it rejects
+the lowest-scored 1%, 2%, 5%, 10%, 20%, and 30% of blocks, and compares each
+policy with 20 matched random rejections, full restoration, calibrated fixed
+beta, image oracle, and 32x32 oracle. This is a validation-only diagnosis; it
+does not load CDD-11_test or automatically authorize a test run.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
