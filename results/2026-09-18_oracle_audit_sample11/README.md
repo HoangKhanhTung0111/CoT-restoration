@@ -2,10 +2,10 @@
 
 ## Scope
 
-This is attempt 1 of at most 3 for the intervention-utility hypothesis. The
-20-epoch exports retained one lossless comparison sheet per degradation type,
-so this audit covers 11 degradation variants of only source scene `00059`.
-It is an exploratory signal, not a validation-set conclusion.
+This local preflight reused the existing 20-epoch exports before the full
+Kaggle audit. The exports retained one lossless comparison sheet per
+degradation type, so this audit covers 11 degradation variants of only source
+scene `00059`. It is an exploratory signal, not a validation-set conclusion.
 
 The oracle is allowed to inspect ground truth and select either the degraded
 input or the restored output at image, 32x32-block, or 8x8-block resolution.
@@ -32,12 +32,12 @@ spatially heterogeneous helpful and harmful interventions on this scene. The
 signal appears for all three model variants, so it is not unique to the failed
 degradation-reasoning adapter.
 
-Attempt 1 passes the exploratory gate, but cannot establish average headroom:
-all 11 samples share one source scene. Attempt 2 must run the same audit on all
-55 validation images inside Kaggle. If the 32x32 oracle does not retain at
-least 0.2 dB mean headroom over both the restored output and best fixed-beta
-control, the local intervention-utility direction stops without training a
-gain predictor.
+The preflight passes the exploratory gate, but cannot establish average
+headroom because all 11 samples share one source scene. The subsequent Kaggle
+run therefore evaluates the same audit on all 55 validation images. If the
+32x32 oracle does not retain at least 0.2 dB mean headroom over both the
+restored output and best fixed-beta control, the local intervention-utility
+direction stops without training a gain predictor.
 
 ## Reproduction
 

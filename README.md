@@ -78,14 +78,14 @@ matched A0-L baseline by 0.068 dB. The current one-pass degradation-reasoning
 branch is therefore stopped; A4/A5 are not justified. See the
 [A3-M report](results/2026-09-17_a3_multiscale/README.md).
 
-A separate intervention-utility feasibility study is now capped at three
-attempts. Attempt 1 recovered the lossless 20-epoch comparison panels and found
-1.79--2.02 dB of 32x32 local-oracle headroom on the available source scene,
-far above the corresponding fixed residual-strength controls. This is only an
-exploratory result because all 11 degradation variants share scene `00059`.
-The A3-M evaluation now computes the same oracle audit over the complete
-55-image validation split. See the
-[attempt-1 oracle report](results/2026-09-18_oracle_audit_sample11/README.md).
+A separate intervention-utility feasibility study first recovered the lossless
+20-epoch comparison panels and found 1.79--2.02 dB of 32x32 local-oracle
+headroom on the available source scene. This local result was only a preflight
+because all 11 degradation variants share scene `00059`. The subsequent Kaggle
+audit on all 55 validation images confirmed +0.686 dB headroom over restoration
+and +0.577 dB over the best fixed residual-strength control, while preserving
+mean SSIM. See the [local preflight](results/2026-09-18_oracle_audit_sample11/README.md)
+and [full-validation report](results/2026-09-18_oracle_result/README.md).
 
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
