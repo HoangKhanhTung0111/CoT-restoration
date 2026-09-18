@@ -28,6 +28,9 @@
     "save_evaluation_images": true,
     "save_comparisons": true,
     "max_saved_per_type": 1,
+    "oracle_audit": true,
+    "oracle_block_sizes": [32, 8],
+    "oracle_beta_step": 0.01,
     "evaluate_reasoning_checkpoint": true,
     "multi_scale_degradation": true,
     "balanced_degradation_loss": true

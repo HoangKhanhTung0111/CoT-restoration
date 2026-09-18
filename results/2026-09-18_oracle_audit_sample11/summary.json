@@ -1,0 +1,146 @@
+{
+  "scope": {
+    "samples": [
+      "haze_00059.png",
+      "haze_rain_00059.png",
+      "haze_snow_00059.png",
+      "low_00059.png",
+      "low_haze_00059.png",
+      "low_haze_rain_00059.png",
+      "low_haze_snow_00059.png",
+      "low_rain_00059.png",
+      "low_snow_00059.png",
+      "rain_00059.png",
+      "snow_00059.png"
+    ],
+    "sample_count": 11,
+    "unique_source_scenes": [
+      "00059"
+    ],
+    "warning": "Exploratory only: the saved 20-epoch contact sheets contain one source scene per degradation type, not the full validation split."
+  },
+  "best_fixed_beta_selected_on_same_sample": {
+    "a0l": 0.93,
+    "a2l": 0.9500000000000001,
+    "a3m": 0.88
+  },
+  "models": {
+    "a0l": {
+      "count": 11,
+      "fixed_beta_0.93": {
+        "mean_psnr": 23.0593917592485,
+        "headroom_over_restored_db": 0.05952146713256212,
+        "mean_restored_fraction": 0.93,
+        "images_worse_than_input": 1
+      },
+      "input": {
+        "mean_psnr": 18.232685945846278,
+        "headroom_over_restored_db": -4.767184346269659,
+        "mean_restored_fraction": 0.0,
+        "images_worse_than_input": 0
+      },
+      "oracle_block_32": {
+        "mean_psnr": 24.7909077196478,
+        "headroom_over_restored_db": 1.7910374275318652,
+        "mean_restored_fraction": 0.7586980920314254,
+        "images_worse_than_input": 0
+      },
+      "oracle_block_8": {
+        "mean_psnr": 25.31231980660778,
+        "headroom_over_restored_db": 2.312449514491842,
+        "mean_restored_fraction": 0.7414365881032547,
+        "images_worse_than_input": 0
+      },
+      "oracle_image": {
+        "mean_psnr": 23.427634510406936,
+        "headroom_over_restored_db": 0.4277642182909993,
+        "mean_restored_fraction": 0.8181818181818182,
+        "images_worse_than_input": 0
+      },
+      "restored": {
+        "mean_psnr": 22.999870292115936,
+        "headroom_over_restored_db": 0.0,
+        "mean_restored_fraction": 1.0,
+        "images_worse_than_input": 2
+      }
+    },
+    "a2l": {
+      "count": 11,
+      "fixed_beta_0.95": {
+        "mean_psnr": 23.135619648861827,
+        "headroom_over_restored_db": 0.039322087039401765,
+        "mean_restored_fraction": 0.95,
+        "images_worse_than_input": 2
+      },
+      "input": {
+        "mean_psnr": 18.232685945846278,
+        "headroom_over_restored_db": -4.863611615976147,
+        "mean_restored_fraction": 0.0,
+        "images_worse_than_input": 0
+      },
+      "oracle_block_32": {
+        "mean_psnr": 25.076397298638366,
+        "headroom_over_restored_db": 1.9800997368159408,
+        "mean_restored_fraction": 0.7617957351290684,
+        "images_worse_than_input": 0
+      },
+      "oracle_block_8": {
+        "mean_psnr": 25.653202838058085,
+        "headroom_over_restored_db": 2.5569052762356606,
+        "mean_restored_fraction": 0.7467863823419378,
+        "images_worse_than_input": 0
+      },
+      "oracle_image": {
+        "mean_psnr": 23.814013251365772,
+        "headroom_over_restored_db": 0.717715689543347,
+        "mean_restored_fraction": 0.8181818181818182,
+        "images_worse_than_input": 0
+      },
+      "restored": {
+        "mean_psnr": 23.096297561822425,
+        "headroom_over_restored_db": 0.0,
+        "mean_restored_fraction": 1.0,
+        "images_worse_than_input": 2
+      }
+    },
+    "a3m": {
+      "count": 11,
+      "fixed_beta_0.88": {
+        "mean_psnr": 23.38204867307007,
+        "headroom_over_restored_db": 0.2416036737295002,
+        "mean_restored_fraction": 0.8800000000000001,
+        "images_worse_than_input": 1
+      },
+      "input": {
+        "mean_psnr": 18.232685945846278,
+        "headroom_over_restored_db": -4.907759053494292,
+        "mean_restored_fraction": 0.0,
+        "images_worse_than_input": 0
+      },
+      "oracle_block_32": {
+        "mean_psnr": 25.15948443962679,
+        "headroom_over_restored_db": 2.019039440286221,
+        "mean_restored_fraction": 0.7655368499812945,
+        "images_worse_than_input": 0
+      },
+      "oracle_block_8": {
+        "mean_psnr": 25.761638388992,
+        "headroom_over_restored_db": 2.621193389651431,
+        "mean_restored_fraction": 0.7455592966704078,
+        "images_worse_than_input": 0
+      },
+      "oracle_image": {
+        "mean_psnr": 23.56105313324654,
+        "headroom_over_restored_db": 0.42060813390596863,
+        "mean_restored_fraction": 0.8181818181818182,
+        "images_worse_than_input": 0
+      },
+      "restored": {
+        "mean_psnr": 23.14044499934057,
+        "headroom_over_restored_db": 0.0,
+        "mean_restored_fraction": 1.0,
+        "images_worse_than_input": 2
+      }
+    }
+  }
+}

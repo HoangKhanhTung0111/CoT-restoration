@@ -72,6 +72,14 @@ def parse_args() -> argparse.Namespace:
         help="Save labelled Input | Restored | Ground truth contact sheets.",
     )
     parser.add_argument("--max-saved-per-type", type=int, default=1)
+    parser.add_argument(
+        "--oracle-audit",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Measure non-deployable input-vs-restoration oracle headroom.",
+    )
+    parser.add_argument("--oracle-block-sizes", type=int, nargs="+", default=[32, 8])
+    parser.add_argument("--oracle-beta-step", type=float, default=0.01)
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-cpu", action="store_true")
     return parser.parse_args()
@@ -241,6 +249,40 @@ def calculate_ssim(prediction: Tensor, target: Tensor) -> float:
     return (numerator / denominator.clamp_min(1e-12)).mean().item()
 
 
+def oracle_block_output(
+    degraded: Tensor,
+    restored: Tensor,
+    target: Tensor,
+    block_size: int,
+) -> Tuple[Tensor, float]:
+    """Select degraded/restored blocks using privileged target information."""
+    if block_size <= 0:
+        raise ValueError("Oracle block sizes must be positive")
+    height, width = target.shape[-2:]
+    pad_height = (-height) % block_size
+    pad_width = (-width) % block_size
+    input_error = (degraded - target).square().sum(dim=1, keepdim=True)
+    restored_error = (restored - target).square().sum(dim=1, keepdim=True)
+    input_sse = F.avg_pool2d(
+        F.pad(input_error, (0, pad_width, 0, pad_height)),
+        kernel_size=block_size,
+        stride=block_size,
+        divisor_override=1,
+    )
+    restored_sse = F.avg_pool2d(
+        F.pad(restored_error, (0, pad_width, 0, pad_height)),
+        kernel_size=block_size,
+        stride=block_size,
+        divisor_override=1,
+    )
+    use_restored = restored_sse < input_sse
+    pixel_mask = use_restored.repeat_interleave(block_size, dim=2).repeat_interleave(
+        block_size, dim=3
+    )[..., :height, :width]
+    output = torch.where(pixel_mask, restored, degraded)
+    return output, float(pixel_mask.float().mean().item())
+
+
 def save_image(tensor: Tensor, path: Path) -> None:
     array = (
         tensor[0]
@@ -332,6 +374,10 @@ def main() -> None:
         raise ValueError("tile must be divisible by 16")
     if args.overlap < 0 or (args.tile > 0 and args.overlap >= args.tile):
         raise ValueError("overlap must be non-negative and smaller than tile")
+    if not 0 < args.oracle_beta_step <= 1:
+        raise ValueError("oracle-beta-step must be in (0, 1]")
+    if any(size <= 0 for size in args.oracle_block_sizes):
+        raise ValueError("oracle-block-sizes must all be positive")
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif args.allow_cpu:
@@ -459,6 +505,31 @@ def main() -> None:
             "delta_ssim": ssim - input_ssim,
             "latency_ms": latency_ms,
         }
+        if args.oracle_audit:
+            base_error = lq_cpu - gt_cpu
+            residual = prediction - lq_cpu
+            row["oracle_beta_a"] = residual.square().mean().item()
+            row["oracle_beta_b"] = (2.0 * base_error * residual).mean().item()
+            row["oracle_beta_c"] = base_error.square().mean().item()
+
+            use_restored = psnr >= input_psnr
+            image_oracle = prediction if use_restored else lq_cpu
+            row["oracle_image_psnr"] = calculate_psnr(image_oracle, gt_cpu)
+            row["oracle_image_ssim"] = calculate_ssim(image_oracle, gt_cpu)
+            row["oracle_image_restored_fraction"] = float(use_restored)
+            for block_size in args.oracle_block_sizes:
+                oracle_output, restored_fraction = oracle_block_output(
+                    lq_cpu, prediction, gt_cpu, block_size
+                )
+                row[f"oracle_block_{block_size}_psnr"] = calculate_psnr(
+                    oracle_output, gt_cpu
+                )
+                row[f"oracle_block_{block_size}_ssim"] = calculate_ssim(
+                    oracle_output, gt_cpu
+                )
+                row[f"oracle_block_{block_size}_restored_fraction"] = (
+                    restored_fraction
+                )
         if "degradation_logits" in auxiliary:
             probabilities = auxiliary["degradation_logits"].sigmoid()[0]
             predicted_labels = probabilities >= 0.5
@@ -522,6 +593,89 @@ def main() -> None:
         if degradation_targets
         else None
     )
+    oracle_audit = None
+    if args.oracle_audit:
+        beta_count = int(round(1.0 / args.oracle_beta_step))
+        beta_candidates = np.linspace(0.0, 1.0, beta_count + 1)
+        beta_scores = []
+        for beta in beta_candidates:
+            beta_psnr = []
+            for row in rows:
+                error = (
+                    float(row["oracle_beta_a"]) * beta * beta
+                    + float(row["oracle_beta_b"]) * beta
+                    + float(row["oracle_beta_c"])
+                )
+                beta_psnr.append(-10.0 * math.log10(max(error, 1e-12)))
+            beta_scores.append(float(np.mean(beta_psnr)))
+        best_beta_index = int(np.argmax(beta_scores))
+        best_beta = float(beta_candidates[best_beta_index])
+        for row in rows:
+            error = (
+                float(row["oracle_beta_a"]) * best_beta * best_beta
+                + float(row["oracle_beta_b"]) * best_beta
+                + float(row["oracle_beta_c"])
+            )
+            row["fixed_beta"] = best_beta
+            row["fixed_beta_psnr"] = -10.0 * math.log10(max(error, 1e-12))
+
+        restored_mean = float(np.mean([float(row["psnr"]) for row in rows]))
+
+        def oracle_method_summary(
+            psnr_key: str,
+            ssim_key: str | None,
+            fraction_key: str | None,
+            default_fraction: float,
+        ) -> Dict[str, object]:
+            mean_psnr = float(np.mean([float(row[psnr_key]) for row in rows]))
+            return {
+                "mean_psnr": mean_psnr,
+                "mean_ssim": (
+                    float(np.mean([float(row[ssim_key]) for row in rows]))
+                    if ssim_key
+                    else None
+                ),
+                "headroom_over_restored_db": mean_psnr - restored_mean,
+                "mean_restored_fraction": (
+                    float(np.mean([float(row[fraction_key]) for row in rows]))
+                    if fraction_key
+                    else default_fraction
+                ),
+                "images_worse_than_input": int(
+                    sum(
+                        float(row[psnr_key]) < float(row["input_psnr"]) - 1e-12
+                        for row in rows
+                    )
+                ),
+            }
+
+        methods: Dict[str, object] = {
+            "restored": oracle_method_summary("psnr", "ssim", None, 1.0),
+            "fixed_beta": oracle_method_summary(
+                "fixed_beta_psnr", None, None, best_beta
+            ),
+            "oracle_image": oracle_method_summary(
+                "oracle_image_psnr",
+                "oracle_image_ssim",
+                "oracle_image_restored_fraction",
+                0.0,
+            ),
+        }
+        for block_size in args.oracle_block_sizes:
+            methods[f"oracle_block_{block_size}"] = oracle_method_summary(
+                f"oracle_block_{block_size}_psnr",
+                f"oracle_block_{block_size}_ssim",
+                f"oracle_block_{block_size}_restored_fraction",
+                0.0,
+            )
+        oracle_audit = {
+            "diagnostic_only": True,
+            "selection_uses_ground_truth": True,
+            "fixed_beta_selected_on_evaluation_split": True,
+            "best_fixed_beta": best_beta,
+            "block_sizes": args.oracle_block_sizes,
+            "methods": methods,
+        }
     summary = {
         "model_type": model_type,
         "preset": preset,
@@ -565,6 +719,7 @@ def main() -> None:
         "parameters": parameter_counts,
         "macs_256": macs,
         "per_type": per_type,
+        "oracle_audit": oracle_audit,
     }
     with (output_dir / "metrics.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))

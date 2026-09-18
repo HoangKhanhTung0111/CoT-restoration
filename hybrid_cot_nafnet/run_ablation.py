@@ -184,6 +184,13 @@ def evaluation_command(
     command.extend(
         ("--max-saved-per-type", str(run.get("max_saved_per_type", 1)))
     )
+    _flag(command, "oracle_audit", bool(run.get("oracle_audit", False)))
+    if run.get("oracle_block_sizes"):
+        command.append("--oracle-block-sizes")
+        command.extend(str(size) for size in run["oracle_block_sizes"])
+    command.extend(
+        ("--oracle-beta-step", str(run.get("oracle_beta_step", 0.01)))
+    )
     _flag(command, "amp", bool(run.get("amp", True)))
     return command
 
