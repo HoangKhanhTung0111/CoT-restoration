@@ -87,6 +87,15 @@ and +0.577 dB over the best fixed residual-strength control, while preserving
 mean SSIM. See the [local preflight](results/2026-09-18_oracle_audit_sample11/README.md)
 and [full-validation report](results/2026-09-18_oracle_result/README.md).
 
+The next falsifiable pilot learns a tiny local signed-gain predictor while the
+A3-M restorer stays frozen. Import
+[`notebooks/kaggle_gain_predictor.ipynb`](notebooks/kaggle_gain_predictor.ipynb)
+from GitHub. It partitions the 25 restoration-training scenes into 20 predictor
+training scenes and 5 source-disjoint calibration scenes, then evaluates once
+on the existing 5-scene validation split. The held-out CDD-11 test split remains
+untouched. Its main controls are the frozen restoration, a calibration-selected
+fixed residual strength, and the privileged 32x32 oracle ceiling.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
