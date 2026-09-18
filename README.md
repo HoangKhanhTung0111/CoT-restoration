@@ -90,11 +90,13 @@ and [full-validation report](results/2026-09-18_oracle_result/README.md).
 The next falsifiable pilot learns a tiny local signed-gain predictor while the
 A3-M restorer stays frozen. Import
 [`notebooks/kaggle_gain_predictor.ipynb`](notebooks/kaggle_gain_predictor.ipynb)
-from GitHub. It partitions the 25 restoration-training scenes into 20 predictor
+from GitHub. It partitions the 20 restorer-training scenes into 15 predictor
 training scenes and 5 source-disjoint calibration scenes, then evaluates once
 on the existing 5-scene validation split. The held-out CDD-11 test split remains
 untouched. Its main controls are the frozen restoration, a calibration-selected
-fixed residual strength, and the privileged 32x32 oracle ceiling.
+fixed residual strength, and the privileged 32x32 oracle ceiling. The pilot
+failed all five prespecified gates: see the
+[gain-predictor report](results/2026-09-18_gain_predictor/README.md).
 
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
