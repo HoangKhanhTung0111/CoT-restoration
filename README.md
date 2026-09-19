@@ -165,6 +165,17 @@ its prespecified gates distinguish local representation/optimization failure,
 sample-distribution mismatch, and evidence strong enough to justify a later
 information-source probe.
 
+The fit audit found that the unchanged architecture can capture 97.75% of the
+headroom on one memorized training image, while the deployed checkpoint
+captures only 1.48% on its exact sampled stream and 1.84% on all training
+blocks. Because it nevertheless improves the normalized block-regret loss, the
+single justified rescue targets objective alignment rather than architecture.
+Import [`notebooks/kaggle_beta_controller_psnr.ipynb`](notebooks/kaggle_beta_controller_psnr.ipynb)
+to train on all blocks with an equal-image log-SSE objective. It automatically
+keeps validation closed unless the calibration-selected controller captures at
+least 20% of training mean-PSNR oracle headroom; test is never loaded. See the
+[training-fit report](results/2026-09-19_fit/README.md).
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
