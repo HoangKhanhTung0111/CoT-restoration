@@ -147,6 +147,14 @@ remaining components, inspect unclipped beta regimes, verify analytic/rendered
 pipeline consistency, and measure the same controller across its scene-disjoint
 train, calibration, and validation splits. The test split remains untouched.
 
+The audit found numerically consistent pipelines but a controller fit/objective
+failure: the controller is already 0.0126 dB below fixed beta on its own full
+training scenes and captures only 1.84% of their oracle-recoverable SSE.
+Validation shows that amplitude control removes 16.47% of fixed-beta SSE, while
+rare blocks whose residual points in a non-helpful direction account for a
+disproportionate 29.13% of the available headroom. See the
+[error-decomposition report](results/2026-09-19_error/README.md).
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
