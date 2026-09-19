@@ -140,6 +140,13 @@ mean SSIM, but this narrow safety trade-off is not a deployable quality win. The
 test split remains closed and the bounded local-controller branch stops. See
 the [controller report](results/2026-09-19_beta_controller/README.md).
 
+The next step is diagnostic rather than another architecture. Import
+[`notebooks/kaggle_error_decomposition_audit.ipynb`](notebooks/kaggle_error_decomposition_audit.ipynb)
+to decompose fixed-beta error into amplitude-recoverable and post-oracle
+remaining components, inspect unclipped beta regimes, verify analytic/rendered
+pipeline consistency, and measure the same controller across its scene-disjoint
+train, calibration, and validation splits. The test split remains untouched.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
