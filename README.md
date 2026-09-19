@@ -112,6 +112,13 @@ images. The selected policy is therefore zero rejection and is not eligible for
 a test run. See the
 [ranking diagnostic report](results/2026-09-19_gain_predictor_new/README.md).
 
+The next bounded AiOIR diagnostic is the privileged continuous-strength oracle
+in [`notebooks/kaggle_continuous_beta_oracle.ipynb`](notebooks/kaggle_continuous_beta_oracle.ipynb).
+It analytically selects residual strength at image and 32x32-block levels,
+compares it with binary oracles and fixed beta, and checks whether any added
+headroom is broad across scenes and both single/composite degradations. It does
+not train a controller or load the test split.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
