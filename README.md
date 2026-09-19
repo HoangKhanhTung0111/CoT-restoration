@@ -133,6 +133,13 @@ with normalized reconstruction regret on 15 scenes, selects its epoch on five
 separate calibration scenes, and evaluates once on the five validation scenes.
 The test split remains closed unless all prespecified validation gates pass.
 
+The controller pilot failed three of five gates: it is 0.0556 dB below fixed
+beta, captures negative oracle headroom, and wins on only one of 11 degradation
+types. It does reduce harmed images from three to two with essentially unchanged
+mean SSIM, but this narrow safety trade-off is not a deployable quality win. The
+test split remains closed and the bounded local-controller branch stops. See
+the [controller report](results/2026-09-19_beta_controller/README.md).
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
