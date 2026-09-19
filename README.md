@@ -119,6 +119,13 @@ compares it with binary oracles and fixed beta, and checks whether any added
 headroom is broad across scenes and both single/composite degradations. It does
 not train a controller or load the test split.
 
+The continuous oracle passed all three gates: it reaches 22.7659 dB, improves
+0.8514 dB over the binary block oracle and 1.5132 dB over calibrated fixed beta,
+with positive gains on all five scenes and both degradation groups. Intermediate
+strength is selected for 40.5% of blocks. See the
+[continuous-beta report](results/2026-09-19_beta/README.md). This justifies one
+frozen-backbone controller pilot; it does not yet establish deployability.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
