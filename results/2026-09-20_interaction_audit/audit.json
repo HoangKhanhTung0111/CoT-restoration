@@ -1,0 +1,24 @@
+{
+  "seed": 20260920,
+  "dtype": "float64",
+  "naive_rewrite": {
+    "loss_absolute_difference": 0.0,
+    "gradient_max_absolute_difference": 1.3877787807814457e-17,
+    "equivalent_within_tolerance": true
+  },
+  "independent_auxiliary_head": {
+    "reconstruction_gradient_on_interaction_head": 0.0,
+    "interaction_loss_gradient_norm": 0.1542280916148921,
+    "is_distinct_training_signal": true
+  },
+  "deployed_additive_decomposition": {
+    "max_difference_between_reconstruction_gradients_of_heads": 0.0,
+    "max_difference_component_vs_reconstruction_gradients": 0.04783824622856156,
+    "interpretation": "Reconstruction constrains only the sum; component targets select one generator-defined decomposition."
+  },
+  "consistency_identity_at_component_targets": {
+    "loss": 1.3499851800657196e-33,
+    "maximum_gradient_norm": 5.070897694671352e-18,
+    "adds_new_target_information": false
+  }
+}

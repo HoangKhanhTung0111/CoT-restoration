@@ -201,6 +201,16 @@ Set `RUN_QUALITATIVE_PROBE = True` to save one labelled
 `Input | Restored | Ground truth` comparison for every degradation type using
 the selected validation preset.
 
+The proposed interaction-supervision direction has now passed through a
+pre-GPU algebra, gradient, data, and literature audit. Its naive loss is exactly
+reconstruction loss rewritten; an independent interaction head is distinct but
+does not yet have a defensible identifiable target or a clear claim beyond
+PRISM's compound-aware primitive/mixture supervision. The current proposal is
+therefore **NO-GO** and no Kaggle run has been created. See the
+[interaction-supervision audit](results/2026-09-20_interaction_audit/README.md)
+and reproduce its numerical checks with
+`python -m hybrid_cot_nafnet.audit_interaction_losses`.
+
 ## Research training controls
 
 The default `sidd32` hybrid run uses the validation-selected official pretrained model,
