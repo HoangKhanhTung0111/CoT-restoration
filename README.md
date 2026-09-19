@@ -78,6 +78,14 @@ matched A0-L baseline by 0.068 dB. The current one-pass degradation-reasoning
 branch is therefore stopped; A4/A5 are not justified. See the
 [A3-M report](results/2026-09-17_a3_multiscale/README.md).
 
+A matched 55-image error comparison shows where A3-M changes the baseline: it
+improves the three haze conditions without low light by 0.638--0.847 dB, but
+loses PSNR on all eight remaining degradation types, including pure rain
+(-0.656 dB) and snow (-0.575 dB). Its PSNR-harm count also rises from 2/55 to
+3/55. See the [A3-M versus A0-L comparison](results/2026-09-19_a3m_a0l_comparison/README.md)
+and its auditable per-type and per-scene tables. This points to
+cross-degradation interference rather than a uniformly weak backbone.
+
 A separate intervention-utility feasibility study first recovered the lossless
 20-epoch comparison panels and found 1.79--2.02 dB of 32x32 local-oracle
 headroom on the available source scene. This local result was only a preflight
