@@ -14,6 +14,9 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
   selection, checkpoint/resume, and experiment metadata.
 - `evaluate.py`: full CDD-11 evaluation using full-frame inference by default,
   with feathered tiles as a memory fallback.
+- `audit_degradation_order.py`: frozen-A0 validation audit that replays the same
+  degradation realization across all formation-order permutations and reports
+  raw plus input-severity-matched effects without loading CDD-11_test.
 
 The research path uses the same spatial crop and augmentation for two different
 degradation views of one scene. Set `--content-weight 0` to disable this branch

@@ -206,10 +206,19 @@ pre-GPU algebra, gradient, data, and literature audit. Its naive loss is exactly
 reconstruction loss rewritten; an independent interaction head is distinct but
 does not yet have a defensible identifiable target or a clear claim beyond
 PRISM's compound-aware primitive/mixture supervision. The current proposal is
-therefore **NO-GO** and no Kaggle run has been created. See the
+therefore **NO-GO**. See the
 [interaction-supervision audit](results/2026-09-20_interaction_audit/README.md)
 and reproduce its numerical checks with
 `python -m hybrid_cot_nafnet.audit_interaction_losses`.
+
+The next approved step is diagnostic rather than a new method. The
+[recent-literature note](docs/recent_aiori_literature_2024_2026.md) records the
+verified method/loss/data overlap for future sessions. Import
+[`notebooks/kaggle_degradation_order_audit.ipynb`](notebooks/kaggle_degradation_order_audit.ipynb)
+to reproduce or reuse A0-L and test its sensitivity to counterfactual formation
+orders using identical factor realizations. The report separates raw order
+effects from input-severity differences, uses validation scenes only, freezes
+the model, and never loads CDD-11_test.
 
 ## Research training controls
 
