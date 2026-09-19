@@ -155,6 +155,16 @@ rare blocks whose residual points in a non-helpful direction account for a
 disproportionate 29.13% of the available headroom. See the
 [error-decomposition report](results/2026-09-19_error/README.md).
 
+The bounded follow-up is the training-fit audit in
+[`notebooks/kaggle_controller_fit_audit.ipynb`](notebooks/kaggle_controller_fit_audit.ipynb).
+It reconstructs the controller's exact sampled training stream, compares that
+stream with every block from the same training scenes, and tests whether the
+unchanged controller architecture can memorize one high-headroom training
+image. The audit itself loads neither calibration, validation, nor test data;
+its prespecified gates distinguish local representation/optimization failure,
+sample-distribution mismatch, and evidence strong enough to justify a later
+information-source probe.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
