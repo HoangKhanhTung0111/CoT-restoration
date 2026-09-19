@@ -126,6 +126,13 @@ strength is selected for 40.5% of blocks. See the
 [continuous-beta report](results/2026-09-19_beta/README.md). This justifies one
 frozen-backbone controller pilot; it does not yet establish deployability.
 
+The bounded controller pilot is available in
+[`notebooks/kaggle_beta_controller.ipynb`](notebooks/kaggle_beta_controller.ipynb).
+It freezes A3-M, predicts one continuous beta per 32x32 block, trains directly
+with normalized reconstruction regret on 15 scenes, selects its epoch on five
+separate calibration scenes, and evaluates once on the five validation scenes.
+The test split remains closed unless all prespecified validation gates pass.
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
