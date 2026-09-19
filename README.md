@@ -105,6 +105,13 @@ policy with 20 matched random rejections, full restoration, calibrated fixed
 beta, image oracle, and 32x32 oracle. This is a validation-only diagnosis; it
 does not load CDD-11_test or automatically authorize a test run.
 
+That diagnostic found that the score ranks relative benefit substantially
+better than matched random rejection, but every nonzero rejection fraction is
+worse than full restoration and fixed beta and none prevents the three harmful
+images. The selected policy is therefore zero rejection and is not eligible for
+a test run. See the
+[ranking diagnostic report](results/2026-09-19_gain_predictor_new/README.md).
+
 The fresh notebook defaults to `RUN_TRAIN = False`: **Run All** first performs a
 read-only audit and saves `/kaggle/working/cot_nafnet_audit/audit.json`. Review
 or share that file before enabling a long run.
