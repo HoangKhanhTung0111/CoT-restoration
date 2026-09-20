@@ -128,6 +128,15 @@ def training_command(
     ]
     for key in required:
         command.extend((f"--{key.replace('_', '-')}", str(run[key])))
+    for key in (
+        "training_data",
+        "order_policy",
+        "synthetic_train_realizations",
+        "synthetic_val_realizations",
+        "generation_seed",
+    ):
+        if key in run:
+            command.extend((f"--{key.replace('_', '-')}", str(run[key])))
     _flag(command, "skip_gates", bool(run.get("skip_gates", True)))
     _flag(
         command,
@@ -219,6 +228,7 @@ def main() -> None:
     for run in runs:
         output_dir = experiments_root / str(run["name"])
         evaluation_summary = output_dir / "evaluation" / "summary.json"
+        skip_standard_evaluation = bool(run.get("skip_standard_evaluation", False))
         evaluate_reasoning = bool(run.get("evaluate_reasoning_checkpoint", False))
         reasoning_summary = output_dir / "reasoning_evaluation" / "summary.json"
         checkpoint = output_dir / "best.pt"
@@ -238,16 +248,25 @@ def main() -> None:
                     f"Unusable training summary at {output_dir}: status={status!r}, "
                     f"completed_epochs={completed_epochs}, expected={expected_epochs}"
                 )
-        evaluations_complete = evaluation_summary.is_file() and (
-            not evaluate_reasoning or reasoning_summary.is_file()
+        evaluations_complete = skip_standard_evaluation or (
+            evaluation_summary.is_file()
+            and (not evaluate_reasoning or reasoning_summary.is_file())
         )
-        if evaluations_complete:
-            if not training_summary:
+        if evaluations_complete and training_summary:
+            if not checkpoint.is_file():
                 raise RuntimeError(
-                    f"Evaluation exists without a training summary at {output_dir}"
+                    f"Training summary exists but best.pt is missing at {output_dir}"
                 )
             print(f"Skipping completed run: {run['name']}")
             continue
+        if (
+            not skip_standard_evaluation
+            and evaluation_summary.is_file()
+            and not training_summary
+        ):
+            raise RuntimeError(
+                f"Evaluation exists without a training summary at {output_dir}"
+            )
         if not training_summary:
             if output_dir.exists() and any(output_dir.iterdir()) and not args.dry_run:
                 raise RuntimeError(
@@ -264,7 +283,7 @@ def main() -> None:
                     f"Training summary exists but best.pt is missing at {output_dir}"
                 )
             print(f"Using existing checkpoint: {checkpoint}")
-        if not evaluation_summary.is_file():
+        if not skip_standard_evaluation and not evaluation_summary.is_file():
             run_checked(evaluation_command(run, data_root, output_dir), args.dry_run)
         if evaluate_reasoning and not reasoning_summary.is_file():
             reasoning_checkpoint = output_dir / "best_reasoning.pt"
@@ -284,16 +303,17 @@ def main() -> None:
                 args.dry_run,
             )
 
-    summary_command = [
-        sys.executable,
-        "-m",
-        "hybrid_cot_nafnet.summarize_experiments",
-        "--experiments-root",
-        str(experiments_root),
-        "--output",
-        str(experiments_root / "ablation_summary.csv"),
-    ]
-    run_checked(summary_command, args.dry_run)
+    if not all(bool(run.get("skip_standard_evaluation", False)) for run in runs):
+        summary_command = [
+            sys.executable,
+            "-m",
+            "hybrid_cot_nafnet.summarize_experiments",
+            "--experiments-root",
+            str(experiments_root),
+            "--output",
+            str(experiments_root / "ablation_summary.csv"),
+        ]
+        run_checked(summary_command, args.dry_run)
 
 
 if __name__ == "__main__":

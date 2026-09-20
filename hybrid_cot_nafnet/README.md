@@ -9,6 +9,8 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
 - `modules/gated_cot_adapter.py`: bottleneck reasoning, four-label degradation
   prediction, and zero-initialized affine gates for every skip connection.
 - `datasets/cdd11.py`: paired CDD-11 loader with a scene-level validation split.
+- `datasets/order_controls.py`: deterministic synthetic low+haze loader for
+  Fixed-A, Fixed-B, and Balanced formation-order controls.
 - `train_kaggle.py`: AMP training, same-scene paired views, content consistency,
   degradation supervision, adapter warm-up, full-frame validation for checkpoint
   selection, checkpoint/resume, and experiment metadata.
@@ -17,6 +19,10 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
 - `audit_degradation_order.py`: frozen-A0 validation audit that replays the same
   degradation realization across all formation-order permutations and reports
   raw plus input-severity-matched effects without loading CDD-11_test.
+- `evaluate_order_controls.py`: joint raw-input evaluation of the three order
+  controls with scene-clustered intervals and preregistered contrasts.
+- `audit_order_control_data.py`: read-only pretraining gate for scene separation,
+  equal update budgets, and paired A/B realization invariants.
 
 The research path uses the same spatial crop and augmentation for two different
 degradation views of one scene. Set `--content-weight 0` to disable this branch

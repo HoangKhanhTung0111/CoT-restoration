@@ -220,6 +220,17 @@ orders using identical factor realizations. The report separates raw order
 effects from input-severity differences, uses validation scenes only, freezes
 the model, and never loads CDD-11_test.
 
+The follow-up causal controls are preregistered in
+[`docs/degradation_order_control_plan.md`](docs/degradation_order_control_plan.md).
+Import
+[`notebooks/kaggle_order_controls_low_haze.ipynb`](notebooks/kaggle_order_controls_low_haze.ipynb)
+to train Fixed-A (`low -> haze`), Fixed-B (`haze -> low`), and Balanced-order
+ERM with an otherwise identical NAFNet protocol. The joint evaluator reports
+per-order restoration metrics, scene-cluster bootstrap intervals, the
+specialization difference-in-differences, and the Balanced-versus-specialist
+gap. This is a three-run exploratory pilot on five held-out clean scenes; it
+does not by itself establish novelty or a publication-level conclusion.
+
 ## Research training controls
 
 The default `sidd32` hybrid run uses the validation-selected official pretrained model,

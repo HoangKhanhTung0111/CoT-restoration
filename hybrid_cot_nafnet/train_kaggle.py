@@ -24,12 +24,14 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data.distributed import DistributedSampler
 
 if __package__ in {None, ""}:
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from hybrid_cot_nafnet.datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from hybrid_cot_nafnet.datasets.order_controls import OrderControlDataset
     from hybrid_cot_nafnet.degradation_metrics import (
         flattened_degradation_metrics,
         multilabel_degradation_metrics,
@@ -41,6 +43,7 @@ if __package__ in {None, ""}:
     )
 else:
     from .datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from .datasets.order_controls import OrderControlDataset
     from .degradation_metrics import (
         flattened_degradation_metrics,
         multilabel_degradation_metrics,
@@ -75,6 +78,21 @@ def parse_args() -> argparse.Namespace:
         default=str(KAGGLE_CDD11_ROOT),
         help="Directory containing CDD-11_train and CDD-11_test.",
     )
+    parser.add_argument(
+        "--training-data",
+        choices=("cdd11", "synthetic_order"),
+        default="cdd11",
+        help="Use paired CDD-11 or the preregistered synthetic low+haze order control.",
+    )
+    parser.add_argument(
+        "--order-policy",
+        choices=("fixed_a", "fixed_b", "balanced"),
+        default="balanced",
+        help="Formation-order policy used only with --training-data synthetic_order.",
+    )
+    parser.add_argument("--synthetic-train-realizations", type=int, default=16)
+    parser.add_argument("--synthetic-val-realizations", type=int, default=3)
+    parser.add_argument("--generation-seed", type=int, default=20260920)
     parser.add_argument("--output-dir", default="/kaggle/working/cot_nafnet_output")
     parser.add_argument("--model", choices=("hybrid", "baseline"), default="hybrid")
     parser.add_argument(
@@ -605,6 +623,19 @@ def main() -> None:
         raise ValueError("freeze-backbone-epochs must be non-negative")
     if args.num_workers < 0 or args.save_every < 0:
         raise ValueError("num-workers and save-every must be non-negative")
+    if args.synthetic_train_realizations <= 0 or args.synthetic_val_realizations <= 0:
+        raise ValueError("synthetic realization counts must be positive")
+    if (
+        args.training_data == "synthetic_order"
+        and args.order_policy == "balanced"
+        and args.synthetic_train_realizations % 2
+    ):
+        raise ValueError("balanced order training requires an even realization count")
+    if args.training_data == "synthetic_order" and args.patches_per_image != 1:
+        raise ValueError(
+            "synthetic_order materializes its update budget via realizations; "
+            "set --patches-per-image 1"
+        )
     if not 0.0 < args.backbone_lr_scale <= 1.0:
         raise ValueError("backbone-lr-scale must be in (0, 1]")
     if args.crop_size % 16:
@@ -613,6 +644,15 @@ def main() -> None:
         args.val_crop_size > 0 and args.val_crop_size % 16
     ):
         raise ValueError("val-crop-size must be zero or divisible by 16")
+
+    if args.training_data == "synthetic_order":
+        # The three controls run in separate processes. Make their shared seed
+        # meaningful by disabling benchmark-driven kernel selection and asking
+        # PyTorch to prefer deterministic implementations when available.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True, warn_only=True)
 
     distributed, rank, local_rank, world_size, device = distributed_context(args)
     is_main = rank == 0
@@ -651,15 +691,52 @@ def main() -> None:
             _git_info(Path(__file__).resolve().parents[1]),
         )
 
-    train_set = CDD11Dataset(
-        data_root,
-        mode="train",
-        crop_size=args.crop_size,
-        val_fraction=args.val_fraction,
-        split_seed=args.seed,
-        augment=True,
-        paired_view=args.model == "hybrid" and args.content_weight > 0,
-    )
+    if args.training_data == "synthetic_order":
+        if args.model != "baseline":
+            raise ValueError(
+                "The preregistered order controls use the baseline model only; "
+                "do not add an adapter before the causal control is resolved."
+            )
+        train_set = OrderControlDataset(
+            data_root,
+            mode="train",
+            order_policy=args.order_policy,
+            realizations=args.synthetic_train_realizations,
+            crop_size=args.crop_size,
+            val_fraction=args.val_fraction,
+            split_seed=args.seed,
+            generation_seed=args.generation_seed,
+        )
+        val_set = OrderControlDataset(
+            data_root,
+            mode="val",
+            order_policy="both",
+            realizations=args.synthetic_val_realizations,
+            crop_size=0,
+            val_fraction=args.val_fraction,
+            split_seed=args.seed,
+            generation_seed=args.generation_seed,
+        )
+        test_probe = None
+    else:
+        train_set = CDD11Dataset(
+            data_root,
+            mode="train",
+            crop_size=args.crop_size,
+            val_fraction=args.val_fraction,
+            split_seed=args.seed,
+            augment=True,
+            paired_view=args.model == "hybrid" and args.content_weight > 0,
+        )
+        val_set = CDD11Dataset(
+            data_root,
+            mode="val",
+            crop_size=args.val_crop_size,
+            val_fraction=args.val_fraction,
+            split_seed=args.seed,
+            augment=False,
+        )
+        test_probe = CDD11Dataset(data_root, mode="test", crop_size=0, augment=False)
     degradation_pos_weight = None
     if args.balanced_degradation_loss:
         label_matrix = torch.stack([sample[2] for sample in train_set.samples]).float()
@@ -668,23 +745,15 @@ def main() -> None:
         if torch.any(positives == 0):
             raise RuntimeError("Balanced degradation loss requires every label in training")
         degradation_pos_weight = (negatives / positives).to(device)
-    val_set = CDD11Dataset(
-        data_root,
-        mode="val",
-        crop_size=args.val_crop_size,
-        val_fraction=args.val_fraction,
-        split_seed=args.seed,
-        augment=False,
-    )
     if set(train_set.scene_ids).intersection(val_set.scene_ids):
         raise RuntimeError("Scene-level leakage detected between train and validation")
-    test_probe = CDD11Dataset(data_root, mode="test", crop_size=0, augment=False)
     development_ids = set(train_set.scene_ids).union(val_set.scene_ids)
-    overlap_with_test = development_ids.intersection(test_probe.scene_ids)
-    if overlap_with_test:
-        raise RuntimeError(
-            f"Scene IDs overlap between development and test: {sorted(overlap_with_test)}"
-        )
+    if test_probe is not None:
+        overlap_with_test = development_ids.intersection(test_probe.scene_ids)
+        if overlap_with_test:
+            raise RuntimeError(
+                f"Scene IDs overlap between development and test: {sorted(overlap_with_test)}"
+            )
     if is_main:
         _write_json(
             output_dir / "dataset_manifest.json",
@@ -692,10 +761,11 @@ def main() -> None:
                 "root": str(data_root),
                 "train_scene_ids": list(train_set.scene_ids),
                 "validation_scene_ids": list(val_set.scene_ids),
-                "test_scene_ids": list(test_probe.scene_ids),
+                "test_scene_ids": list(test_probe.scene_ids) if test_probe else [],
+                "test_split_loaded": test_probe is not None,
                 "train_samples": len(train_set),
                 "validation_samples": len(val_set),
-                "test_samples": len(test_probe),
+                "test_samples": len(test_probe) if test_probe else 0,
                 "train_crop_size": args.crop_size,
                 "validation_crop_size": args.val_crop_size,
                 "degradation_pos_weight": (
@@ -708,12 +778,28 @@ def main() -> None:
     global_sample_count = len(train_set) * max(1, args.patches_per_image)
     if global_sample_count % world_size:
         raise ValueError("Sample count must be divisible by WORLD_SIZE")
-    sampler = RandomSampler(
-        train_set,
-        replacement=True,
-        num_samples=global_sample_count // world_size,
-        generator=torch.Generator().manual_seed(args.seed + rank),
-    )
+    if args.training_data == "synthetic_order" and distributed:
+        sampler = DistributedSampler(
+            train_set,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=args.seed,
+            drop_last=False,
+        )
+    elif args.training_data == "synthetic_order":
+        sampler = RandomSampler(
+            train_set,
+            replacement=False,
+            generator=torch.Generator().manual_seed(args.seed),
+        )
+    else:
+        sampler = RandomSampler(
+            train_set,
+            replacement=True,
+            num_samples=global_sample_count // world_size,
+            generator=torch.Generator().manual_seed(args.seed + rank),
+        )
     train_loader = make_loader(
         train_set,
         local_batch_size,
@@ -738,7 +824,10 @@ def main() -> None:
     if is_main:
         print(train_set.summary())
         print(val_set.summary())
-        print(test_probe.summary())
+        if test_probe is not None:
+            print(test_probe.summary())
+        else:
+            print("CDD-11_test not loaded for synthetic order controls")
         print(
             f"Model={args.model}/{args.preset} "
             f"total={parameter_counts['total']/1e6:.3f}M "
@@ -896,6 +985,7 @@ def main() -> None:
                 "parallel_strategy": "ddp" if distributed else "single_process",
                 "world_size": world_size,
                 "visible_cuda_devices": list(range(torch.cuda.device_count())),
+                "deterministic_order_control": args.training_data == "synthetic_order",
             },
         )
     del sample, probe
@@ -935,6 +1025,10 @@ def main() -> None:
         has_cot_adapter(model) and args.degradation_weight > 0
     )
     for epoch in range(start_epoch, args.epochs):
+        if hasattr(train_set, "set_epoch"):
+            train_set.set_epoch(epoch)
+        if isinstance(sampler, DistributedSampler):
+            sampler.set_epoch(epoch)
         backbone_trainable = not (
             has_cot_adapter(model) and epoch < args.freeze_backbone_epochs
         )
