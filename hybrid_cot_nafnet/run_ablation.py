@@ -134,6 +134,7 @@ def training_command(
         "synthetic_train_realizations",
         "synthetic_val_realizations",
         "generation_seed",
+        "group_dro_eta",
     ):
         if key in run:
             command.extend((f"--{key.replace('_', '-')}", str(run[key])))
@@ -152,6 +153,7 @@ def training_command(
     _flag(command, "pin_memory", bool(run.get("pin_memory", False)))
     _flag(command, "save_optimizer", bool(run.get("save_optimizer", False)))
     _flag(command, "amp", bool(run.get("amp", True)))
+    _flag(command, "group_dro", bool(run.get("group_dro", False)))
     command.extend(("--save-every", "0"))
     return command
 

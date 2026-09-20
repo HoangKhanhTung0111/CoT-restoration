@@ -21,6 +21,8 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
   raw plus input-severity-matched effects without loading CDD-11_test.
 - `evaluate_order_controls.py`: joint raw-input evaluation of the three order
   controls with scene-clustered intervals and preregistered contrasts.
+- `evaluate_group_dro_control.py`: evaluates the one robust-training control
+  against the locked per-sample result ZIP from the three earlier controls.
 - `audit_order_control_data.py`: read-only pretraining gate for scene separation,
   equal update budgets, and paired A/B realization invariants.
 

@@ -121,3 +121,44 @@ Giai đoạn hiện tại có đúng ba run bắt buộc và tối đa một run
 4. Tạo một Kaggle notebook chạy ba control và đóng gói báo cáo nhẹ.
 5. Smoke-test local bằng model compact và ảnh giả; không coi smoke test là kết quả
    nghiên cứu.
+
+## Quyết định sau ba control (2026-09-20)
+
+Ba control đã chạy đúng protocol trên năm clean scene validation. Specialization
+difference-in-differences đạt `5,9645 dB`, CI95% scene-clustered
+`[5,2890; 6,6399]`. Balanced-order ERM tốt nhất về trung bình và worst-order nhưng
+vẫn thấp hơn specialist tương ứng `1,1477 dB`, CI95%
+`[0,9416; 1,3399]`. Vì vậy cây quyết định đi tới đúng một Group DRO control.
+
+## Group DRO control được đăng ký trước
+
+- Dữ liệu, seed, pretrained NAFNet-SIDD-width32, 20 epoch, 320 mẫu/epoch, batch,
+  optimizer, learning-rate schedule, loss cơ sở và split giữ nguyên như Balanced ERM.
+- Hai group là formation order A và B; dữ liệu mỗi epoch cân bằng chính xác 50/50.
+- Trọng số group bắt đầu `[0.5, 0.5]`.
+- Sau mỗi epoch, tính restoration loss trung bình của từng group trên toàn bộ hai GPU
+  rồi cập nhật bằng exponentiated gradient với `eta=0.1`:
+
+  `q_g <- q_g * exp(eta * (L_g - mean(L)))`, sau đó chuẩn hóa tổng về 1.
+
+- Weight decay `0.001` được giữ làm regularization; không sweep eta hay hyperparameter.
+- Checkpoint được chọn bằng **worst-order validation PSNR**, thay vì PSNR trung bình.
+- Test split tiếp tục bị khóa.
+
+Đối chứng chính dùng chính `per_sample.csv` của ba control trước. Các khóa
+`scene_id`, `realization`, `generation_seed`, `order` và input metric phải khớp hoàn
+toàn trước khi so sánh.
+
+### Tiêu chí diễn giải đã khóa
+
+- **Khắc phục đầy đủ:** Group DRO cải thiện worst-order so với Balanced ERM, không
+  gây giảm trung bình có ý nghĩa, và khoảng cách tới specialist nằm trong margin
+  quản lý pilot `0,1 dB`.
+- **Khắc phục một phần:** worst-order tăng với CI95% scene-clustered có cận dưới lớn
+  hơn 0, nhưng khoảng cách specialist vẫn vượt `0,1 dB`.
+- **Không khắc phục:** worst-order không tăng đáng tin cậy, hoặc mức tăng phải đổi
+  bằng suy giảm trung bình rõ rệt.
+
+Ngưỡng cải thiện thực dụng `0,2 dB` và equivalence margin `0,1 dB` vẫn chỉ là cổng
+quản lý pilot. Dù kết quả thuộc nhánh nào, năm scene và một cặp synthetic low+haze
+không đủ cho claim tổng quát hay contribution công bố.

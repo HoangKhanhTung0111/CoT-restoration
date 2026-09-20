@@ -93,6 +93,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--synthetic-train-realizations", type=int, default=16)
     parser.add_argument("--synthetic-val-realizations", type=int, default=3)
     parser.add_argument("--generation-seed", type=int, default=20260920)
+    parser.add_argument(
+        "--group-dro",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use epoch-level exponentiated-gradient weights over formation orders.",
+    )
+    parser.add_argument(
+        "--group-dro-eta",
+        type=float,
+        default=0.1,
+        help="Exponentiated-gradient step for the two order-group weights.",
+    )
     parser.add_argument("--output-dir", default="/kaggle/working/cot_nafnet_output")
     parser.add_argument("--model", choices=("hybrid", "baseline"), default="hybrid")
     parser.add_argument(
@@ -339,6 +351,24 @@ def fft_loss(prediction: Tensor, target: Tensor) -> Tensor:
     return F.l1_loss(torch.view_as_real(pred_fft), torch.view_as_real(target_fft))
 
 
+def restoration_loss_per_sample(
+    prediction: Tensor, target: Tensor, fft_weight: float
+) -> Tensor:
+    """PSNR-style plus FFT loss without reducing the batch dimension."""
+    mse = (prediction.float() - target.float()).square().mean(dim=(1, 2, 3))
+    losses = (10.0 / math.log(10.0)) * torch.log(mse + 1e-8)
+    if fft_weight:
+        pred_fft = torch.view_as_real(
+            torch.fft.rfft2(prediction.float(), norm="ortho")
+        )
+        target_fft = torch.view_as_real(
+            torch.fft.rfft2(target.float(), norm="ortho")
+        )
+        fft_per_sample = (pred_fft - target_fft).abs().mean(dim=(1, 2, 3, 4))
+        losses = losses + fft_weight * fft_per_sample
+    return losses
+
+
 def amp_context(device: torch.device, enabled: bool):
     if enabled:
         return torch.autocast(device_type="cuda", dtype=torch.float16)
@@ -387,6 +417,8 @@ def validate(
     gate_sum = 0.0
     degradation_targets = []
     degradation_probabilities = []
+    order_psnr_sums = {"low>haze": 0.0, "haze>low": 0.0}
+    order_counts = {"low>haze": 0, "haze>low": 0}
     for batch in loader:
         lq = batch["lq"].to(device, non_blocking=True)
         gt = batch["gt"].to(device, non_blocking=True)
@@ -406,7 +438,14 @@ def validate(
             else:
                 prediction, bce = validation_model(lq), torch.zeros((), device=device)
         mse = (prediction.clamp(0, 1).float() - gt.float()).square().mean(dim=(1, 2, 3))
-        psnr_sum += (-10.0 * torch.log10(mse + 1e-8)).sum().item()
+        sample_psnr = -10.0 * torch.log10(mse + 1e-8)
+        psnr_sum += sample_psnr.sum().item()
+        if "formation_order" in batch:
+            for order, value in zip(batch["formation_order"], sample_psnr.tolist()):
+                if order not in order_psnr_sums:
+                    raise RuntimeError(f"Unexpected validation formation order: {order}")
+                order_psnr_sums[order] += float(value)
+                order_counts[order] += 1
         bce_sum += bce.item() * lq.shape[0]
         sample_count += lq.shape[0]
     model.train()
@@ -415,6 +454,16 @@ def validate(
         "bce": bce_sum / sample_count,
         "gate_mean_abs": gate_sum / sample_count if label_count else 0.0,
     }
+    if all(order_counts.values()):
+        result["order_a_psnr"] = order_psnr_sums["low>haze"] / order_counts["low>haze"]
+        result["order_b_psnr"] = order_psnr_sums["haze>low"] / order_counts["haze>low"]
+        result["worst_order_psnr"] = min(
+            result["order_a_psnr"], result["order_b_psnr"]
+        )
+    else:
+        result["order_a_psnr"] = result["psnr"]
+        result["order_b_psnr"] = result["psnr"]
+        result["worst_order_psnr"] = result["psnr"]
     if degradation_targets:
         detailed = multilabel_degradation_metrics(
             np.concatenate(degradation_targets),
@@ -625,6 +674,22 @@ def main() -> None:
         raise ValueError("num-workers and save-every must be non-negative")
     if args.synthetic_train_realizations <= 0 or args.synthetic_val_realizations <= 0:
         raise ValueError("synthetic realization counts must be positive")
+    if args.group_dro_eta <= 0:
+        raise ValueError("group-dro-eta must be positive")
+    if args.group_dro and (
+        args.training_data != "synthetic_order"
+        or args.order_policy != "balanced"
+        or args.model != "baseline"
+    ):
+        raise ValueError(
+            "The preregistered Group DRO control requires synthetic_order, "
+            "order_policy=balanced, and model=baseline"
+        )
+    if args.group_dro and args.resume:
+        raise ValueError(
+            "The preregistered one-shot Group DRO control does not support resume, "
+            "because its group-weight trajectory must start from [0.5, 0.5]."
+        )
     if (
         args.training_data == "synthetic_order"
         and args.order_policy == "balanced"
@@ -996,6 +1061,10 @@ def main() -> None:
             print(f"Rank 0 GPU: {torch.cuda.get_device_name(device)}")
 
     psnr_loss = PSNRLoss()
+    group_weights = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
+    last_group_losses = torch.tensor(
+        [float("nan"), float("nan")], dtype=torch.float64, device=device
+    )
     log_path = output_dir / "train_log.csv"
     memory_log_path = output_dir / "memory_log.csv"
     if is_main and (not log_path.exists() or start_epoch == 0):
@@ -1006,7 +1075,10 @@ def main() -> None:
                     "train_degradation", "train_content", "train_decorrelation",
                     "train_gate", "val_psnr", "val_bce",
                     *[f"val_{key}" for key in DEGRADATION_VALIDATION_KEYS],
-                    "val_gate_mean_abs",
+                    "val_gate_mean_abs", "val_order_a_psnr", "val_order_b_psnr",
+                    "val_worst_order_psnr", "checkpoint_selection_score",
+                    "next_group_weight_a", "next_group_weight_b",
+                    "group_train_loss_a", "group_train_loss_b",
                     "backbone_lr", "adapter_lr", "minutes",
                 ]
             )
@@ -1050,6 +1122,9 @@ def main() -> None:
             "decorrelation": 0.0,
             "gate": 0.0,
         }
+        epoch_group_loss_sums = torch.zeros(2, dtype=torch.float64, device=device)
+        epoch_group_counts = torch.zeros(2, dtype=torch.float64, device=device)
+        weights_used_this_epoch = group_weights.clone()
         optimizer_steps = 0
         for step, batch in enumerate(train_loader, start=1):
             optimizer.zero_grad(set_to_none=True)
@@ -1096,11 +1171,50 @@ def main() -> None:
                                 prediction = model(lq)
                                 degradation = torch.zeros((), device=device)
                                 auxiliary = {}
-                            restoration = psnr_loss(prediction, gt)
-                            if args.fft_weight:
-                                restoration = restoration + args.fft_weight * fft_loss(
-                                    prediction, gt
+                            if args.group_dro:
+                                per_sample_restoration = restoration_loss_per_sample(
+                                    prediction, gt, args.fft_weight
                                 )
+                                order_names = list(batch["formation_order"])[begin:end]
+                                group_ids = torch.tensor(
+                                    [0 if name == "low>haze" else 1 for name in order_names],
+                                    dtype=torch.long,
+                                    device=device,
+                                )
+                                if any(
+                                    name not in {"low>haze", "haze>low"}
+                                    for name in order_names
+                                ):
+                                    raise RuntimeError(
+                                        f"Unexpected training formation order: {order_names}"
+                                    )
+                                # The full epoch is exactly 50/50 A/B, so 2*q_g
+                                # gives an unbiased estimate of sum_g q_g E[L|g].
+                                restoration = (
+                                    per_sample_restoration
+                                    * (
+                                        2.0
+                                        * weights_used_this_epoch[group_ids].to(
+                                            per_sample_restoration.dtype
+                                        )
+                                    )
+                                ).mean()
+                                epoch_group_loss_sums.scatter_add_(
+                                    0,
+                                    group_ids,
+                                    per_sample_restoration.detach().double(),
+                                )
+                                epoch_group_counts.scatter_add_(
+                                    0,
+                                    group_ids,
+                                    torch.ones_like(group_ids, dtype=torch.float64),
+                                )
+                            else:
+                                restoration = psnr_loss(prediction, gt)
+                                if args.fft_weight:
+                                    restoration = restoration + args.fft_weight * fft_loss(
+                                        prediction, gt
+                                    )
                             if has_paired_view:
                                 content = content_consistency_loss(
                                     auxiliary["content_embedding"], pair_size
@@ -1145,6 +1259,8 @@ def main() -> None:
                         decorrelation,
                         gate,
                     )
+                    if args.group_dro:
+                        del per_sample_restoration, group_ids
                 scaler.unscale_(optimizer)
                 if not backbone_trainable:
                     clear_backbone_gradients(model)
@@ -1199,6 +1315,24 @@ def main() -> None:
         reduced = aggregate.cpu().tolist()
         reduced_totals = dict(zip(totals, reduced[:-1]))
         reduced_steps = max(1.0, reduced[-1])
+        if args.group_dro:
+            group_statistics = torch.cat(
+                [epoch_group_loss_sums, epoch_group_counts]
+            )
+            if distributed:
+                dist.all_reduce(group_statistics, op=dist.ReduceOp.SUM)
+            group_sums = group_statistics[:2]
+            group_counts = group_statistics[2:]
+            if torch.any(group_counts <= 0):
+                raise RuntimeError(
+                    f"Group DRO epoch is missing an order group: {group_counts.tolist()}"
+                )
+            last_group_losses = group_sums / group_counts
+            centered_losses = last_group_losses - last_group_losses.mean()
+            group_weights = group_weights * torch.exp(
+                args.group_dro_eta * centered_losses
+            )
+            group_weights = group_weights / group_weights.sum()
         append_memory_log(
             memory_log_path,
             epoch + 1,
@@ -1219,6 +1353,9 @@ def main() -> None:
             "bce",
             *DEGRADATION_VALIDATION_KEYS,
             "gate_mean_abs",
+            "order_a_psnr",
+            "order_b_psnr",
+            "worst_order_psnr",
         )
         metric_tensor = torch.tensor(
             [last_validation.get(key, 0.0) for key in metric_keys],
@@ -1240,19 +1377,25 @@ def main() -> None:
             world_size,
         )
         val_psnr = last_validation["psnr"]
+        checkpoint_selection_score = (
+            last_validation["worst_order_psnr"]
+            if args.group_dro
+            else val_psnr
+        )
         val_macro_f1 = last_validation["degradation_macro_f1"]
-        psnr_improved = val_psnr > best_psnr
+        psnr_improved = checkpoint_selection_score > best_psnr
         reasoning_improved = (
             reasoning_checkpoint_enabled
             and val_macro_f1 > best_degradation_macro_f1
         )
-        next_best_psnr = max(best_psnr, val_psnr)
+        next_best_psnr = max(best_psnr, checkpoint_selection_score)
         next_best_macro_f1 = max(best_degradation_macro_f1, val_macro_f1)
         averages = {key: value / reduced_steps for key, value in reduced_totals.items()}
         elapsed_minutes = (time.monotonic() - started_at) / 60.0
         if is_main:
             print(
                 f"epoch {epoch+1:03d}: val_psnr={val_psnr:.4f} "
+                f"worst_order={last_validation['worst_order_psnr']:.4f} "
                 f"val_bce={last_validation['bce']:.4f} "
                 f"val_f1={last_validation['degradation_micro_f1']:.4f} "
                 f"macro_f1={last_validation['degradation_macro_f1']:.4f} "
@@ -1287,7 +1430,11 @@ def main() -> None:
                         next_best_psnr,
                         next_best_macro_f1,
                         args,
-                        "validation_psnr",
+                        (
+                            "validation_worst_order_psnr"
+                            if args.group_dro
+                            else "validation_psnr"
+                        ),
                     ),
                     output_dir / "best.pt",
                 )
@@ -1307,7 +1454,7 @@ def main() -> None:
                 atomic_save(payload, output_dir / f"epoch_{epoch+1:03d}.pt")
             del payload
         if psnr_improved:
-            best_psnr = val_psnr
+            best_psnr = checkpoint_selection_score
             best_psnr_epoch = epoch + 1
         if reasoning_improved:
             best_degradation_macro_f1 = val_macro_f1
@@ -1341,6 +1488,14 @@ def main() -> None:
                             for key in DEGRADATION_VALIDATION_KEYS
                         ],
                         last_validation["gate_mean_abs"],
+                        last_validation["order_a_psnr"],
+                        last_validation["order_b_psnr"],
+                        last_validation["worst_order_psnr"],
+                        checkpoint_selection_score,
+                        float(group_weights[0].item()),
+                        float(group_weights[1].item()),
+                        float(last_group_losses[0].item()),
+                        float(last_group_losses[1].item()),
                         optimizer.param_groups[0]["lr"],
                         optimizer.param_groups[-1]["lr"],
                         elapsed_minutes,
@@ -1374,6 +1529,20 @@ def main() -> None:
                 "completed_epochs": completed_epochs,
                 "best_validation_psnr": best_psnr,
                 "best_validation_psnr_epoch": best_psnr_epoch,
+                "checkpoint_selection_metric": (
+                    "validation_worst_order_psnr"
+                    if args.group_dro
+                    else "validation_psnr"
+                ),
+                "best_checkpoint_selection_score": best_psnr,
+                "group_dro": args.group_dro,
+                "group_dro_eta": args.group_dro_eta if args.group_dro else None,
+                "final_group_weights": (
+                    group_weights.cpu().tolist() if args.group_dro else None
+                ),
+                "final_group_train_losses": (
+                    last_group_losses.cpu().tolist() if args.group_dro else None
+                ),
                 "best_degradation_macro_f1": (
                     best_degradation_macro_f1
                     if reasoning_checkpoint_enabled
@@ -1402,7 +1571,10 @@ def main() -> None:
                 },
             },
         )
-        print(f"Training complete. Best validation PSNR: {best_psnr:.4f} dB")
+        selection_label = (
+            "worst-order validation PSNR" if args.group_dro else "validation PSNR"
+        )
+        print(f"Training complete. Best {selection_label}: {best_psnr:.4f} dB")
         if reasoning_checkpoint_enabled:
             print(
                 "Best degradation macro-F1: "

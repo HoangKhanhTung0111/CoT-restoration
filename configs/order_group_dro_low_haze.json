@@ -1,0 +1,45 @@
+{
+  "description": "One preregistered Group DRO control after Balanced-order ERM remained below order specialists.",
+  "protocol": "Same low+haze data, initialization, update budget, loss, and seed as Balanced ERM. Only the robust group objective and worst-order checkpoint selection change.",
+  "shared": {
+    "training_data": "synthetic_order",
+    "order_policy": "balanced",
+    "group_dro": true,
+    "group_dro_eta": 0.1,
+    "preset": "sidd32",
+    "pretrained": "auto",
+    "adapter_hidden": 64,
+    "seed": 42,
+    "generation_seed": 20260920,
+    "crop_size": 256,
+    "val_crop_size": 0,
+    "synthetic_train_realizations": 16,
+    "synthetic_val_realizations": 3,
+    "epochs": 20,
+    "max_minutes": 0,
+    "batch_size": 4,
+    "microbatch_size": 2,
+    "patches_per_image": 1,
+    "num_workers": 0,
+    "pin_memory": false,
+    "save_optimizer": false,
+    "learning_rate": 0.0002,
+    "backbone_lr_scale": 1.0,
+    "weight_decay": 0.001,
+    "fft_weight": 0.05,
+    "freeze_backbone_epochs": 0,
+    "amp": true,
+    "model": "baseline",
+    "skip_gates": false,
+    "degradation_weight": 0.0,
+    "content_weight": 0.0,
+    "decorrelation_weight": 0.0,
+    "gate_weight": 0.0,
+    "skip_standard_evaluation": true
+  },
+  "runs": [
+    {
+      "name": "order_group_dro_ab_seed42_20ep"
+    }
+  ]
+}

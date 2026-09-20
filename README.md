@@ -231,6 +231,13 @@ specialization difference-in-differences, and the Balanced-versus-specialist
 gap. This is a three-run exploratory pilot on five held-out clean scenes; it
 does not by itself establish novelty or a publication-level conclusion.
 
+If those controls support both order specialization and a remaining
+Balanced-versus-specialist gap, import
+[`notebooks/kaggle_order_group_dro_low_haze.ipynb`](notebooks/kaggle_order_group_dro_low_haze.ipynb)
+for the single preregistered robust-training control. Attach the preceding
+`order_controls_low_haze_results.zip` as a Kaggle Dataset; the notebook reuses
+its locked per-sample reference instead of retraining the three earlier models.
+
 ## Research training controls
 
 The default `sidd32` hybrid run uses the validation-selected official pretrained model,
