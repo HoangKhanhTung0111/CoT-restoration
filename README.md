@@ -234,9 +234,10 @@ does not by itself establish novelty or a publication-level conclusion.
 If those controls support both order specialization and a remaining
 Balanced-versus-specialist gap, import
 [`notebooks/kaggle_order_group_dro_low_haze.ipynb`](notebooks/kaggle_order_group_dro_low_haze.ipynb)
-for the single preregistered robust-training control. Attach the preceding
-`order_controls_low_haze_results.zip` as a Kaggle Dataset; the notebook reuses
-its locked per-sample reference instead of retraining the three earlier models.
+for the single preregistered robust-training control. It first reuses the
+preceding `order_controls_low_haze_results.zip` from `/kaggle/working`, then
+falls back to an attached Kaggle Dataset if the prior session is unavailable;
+the three earlier models are never retrained.
 
 ## Research training controls
 
