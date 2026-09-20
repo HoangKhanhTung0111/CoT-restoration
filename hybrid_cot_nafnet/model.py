@@ -190,6 +190,96 @@ class CoTNAFNet(NAFNet):
         return output
 
 
+class OrderConditioner(nn.Module):
+    """Zero-initialized affine modulation from a privileged binary order code."""
+
+    def __init__(
+        self,
+        bottleneck_channels: int,
+        skip_channels: Sequence[int],
+        hidden_channels: int = 32,
+        modulation_limit: float = 0.1,
+    ) -> None:
+        super().__init__()
+        if hidden_channels < 2:
+            raise ValueError("hidden_channels must be at least 2")
+        self.bottleneck_channels = int(bottleneck_channels)
+        self.skip_channels = tuple(int(value) for value in skip_channels)
+        self.modulation_limit = float(modulation_limit)
+        self.embedding = nn.Embedding(2, hidden_channels)
+        self.planner = nn.Sequential(
+            nn.Linear(hidden_channels, hidden_channels),
+            nn.GELU(),
+        )
+        channels = (self.bottleneck_channels,) + self.skip_channels
+        self.affine = nn.Linear(hidden_channels, 2 * sum(channels))
+        # Both true-code and fixed-code models are exactly the pretrained NAFNet
+        # function at initialization. Only training can activate conditioning.
+        nn.init.zeros_(self.affine.weight)
+        nn.init.zeros_(self.affine.bias)
+
+    def _modulate(self, feature: Tensor, scale: Tensor, bias: Tensor) -> Tensor:
+        limit = self.modulation_limit
+        return feature * (1.0 + limit * torch.tanh(scale)) + limit * torch.tanh(bias)
+
+    def forward(
+        self,
+        bottleneck: Tensor,
+        skips: Sequence[Tensor],
+        order_ids: Tensor,
+    ) -> Tuple[Tensor, List[Tensor]]:
+        if order_ids.ndim != 1 or order_ids.shape[0] != bottleneck.shape[0]:
+            raise ValueError(
+                "order_ids must have shape [batch] matching the image batch"
+            )
+        if torch.any((order_ids < 0) | (order_ids > 1)):
+            raise ValueError("order_ids must contain only 0 (A) or 1 (B)")
+        plan = self.planner(self.embedding(order_ids.long()))
+        affine = self.affine(plan)
+        channels = (self.bottleneck_channels,) + self.skip_channels
+        groups = affine.split([2 * value for value in channels], dim=1)
+        scale, bias = groups[0].split(self.bottleneck_channels, dim=1)
+        bottleneck = self._modulate(
+            bottleneck, scale[:, :, None, None], bias[:, :, None, None]
+        )
+        conditioned_skips: List[Tensor] = []
+        for skip, item, channel_count in zip(skips, groups[1:], self.skip_channels):
+            scale, bias = item.split(channel_count, dim=1)
+            conditioned_skips.append(
+                self._modulate(
+                    skip, scale[:, :, None, None], bias[:, :, None, None]
+                )
+            )
+        return bottleneck, conditioned_skips
+
+
+class OrderConditionedNAFNet(NAFNet):
+    """NAFNet with a matched tiny conditioner for the privileged-order oracle."""
+
+    def __init__(self, order_hidden: int = 32, **kwargs) -> None:
+        super().__init__(**kwargs)
+        width = int(kwargs.get("width", 32))
+        skip_channels = [width * (2**level) for level in range(len(self.encoders))]
+        bottleneck_channels = width * (2 ** len(self.encoders))
+        self.order_conditioner = OrderConditioner(
+            bottleneck_channels,
+            skip_channels,
+            hidden_channels=order_hidden,
+        )
+
+    def forward(self, inp: Tensor, order_ids: Tensor | None = None) -> Tensor:
+        original_height, original_width = inp.shape[-2:]
+        padded = self.check_image_size(inp)
+        x, skips = self._encode(self.intro(padded))
+        x = self.middle_blks(x)
+        if order_ids is None:
+            order_ids = torch.zeros(inp.shape[0], dtype=torch.long, device=inp.device)
+        x, skips = self.order_conditioner(x, skips, order_ids)
+        x = self._decode(x, skips)
+        output = self.ending(x) + padded
+        return output[:, :, :original_height, :original_width]
+
+
 @dataclass(frozen=True)
 class ModelPreset:
     width: int
@@ -217,6 +307,7 @@ def build_model(
     adapter_hidden: int = 64,
     use_skip_gates: bool = True,
     use_multiscale_degradation: bool = False,
+    order_hidden: int = 32,
 ) -> nn.Module:
     if preset not in PRESETS:
         raise KeyError(f"Unknown preset {preset!r}; choose from {sorted(PRESETS)}")
@@ -237,7 +328,9 @@ def build_model(
             use_multiscale_degradation=use_multiscale_degradation,
             **kwargs,
         )
-    raise KeyError("model_type must be 'baseline' or 'hybrid'")
+    if model_type == "order_conditioned":
+        return OrderConditionedNAFNet(order_hidden=order_hidden, **kwargs)
+    raise KeyError("model_type must be 'baseline', 'hybrid', or 'order_conditioned'")
 
 
 def count_parameters(model: nn.Module) -> Dict[str, int]:
@@ -245,6 +338,6 @@ def count_parameters(model: nn.Module) -> Dict[str, int]:
     adapter = sum(
         parameter.numel()
         for name, parameter in model.named_parameters()
-        if name.startswith("cot_adapter.")
+        if name.startswith(("cot_adapter.", "order_conditioner."))
     )
     return {"total": total, "adapter": adapter, "backbone": total - adapter}

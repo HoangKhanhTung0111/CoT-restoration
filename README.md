@@ -239,6 +239,17 @@ preceding `order_controls_low_haze_results.zip` from `/kaggle/working`, then
 falls back to an attached Kaggle Dataset if the prior session is unavailable;
 the three earlier models are never retrained.
 
+Group DRO did not close the specialist gap, so the next and only authorized
+order diagnostic is the privileged true-order oracle. Import
+[`notebooks/kaggle_order_condition_oracle_low_haze.ipynb`](notebooks/kaggle_order_condition_oracle_low_haze.ipynb).
+It trains two architecture-matched, zero-initialized conditioned NAFNet models:
+one receives the true synthetic formation-order label and one always receives
+a fixed code. The earlier Fixed-A/Fixed-B/Balanced per-sample reference is
+committed as a small JSON file, so this notebook needs only the existing CDD-11
+and NAFNet checkpoint inputs; no prior result ZIP or extra Kaggle Dataset is
+required. This is a bounded information oracle, not a deployable blind-AiOIR
+method.
+
 ## Research training controls
 
 The default `sidd32` hybrid run uses the validation-selected official pretrained model,

@@ -106,13 +106,24 @@ def parse_args() -> argparse.Namespace:
         help="Exponentiated-gradient step for the two order-group weights.",
     )
     parser.add_argument("--output-dir", default="/kaggle/working/cot_nafnet_output")
-    parser.add_argument("--model", choices=("hybrid", "baseline"), default="hybrid")
+    parser.add_argument(
+        "--model",
+        choices=("hybrid", "baseline", "order_conditioned"),
+        default="hybrid",
+    )
     parser.add_argument(
         "--preset",
         choices=("gopro32", "gopro64", "sidd32", "sidd64", "nafnet32", "compact"),
         default="gopro32",
     )
     parser.add_argument("--adapter-hidden", type=int, default=64)
+    parser.add_argument("--order-hidden", type=int, default=32)
+    parser.add_argument(
+        "--order-condition-mode",
+        choices=("true", "fixed"),
+        default="fixed",
+        help="Use the generator order label or a constant zero code.",
+    )
     parser.add_argument(
         "--pretrained",
         default="auto",
@@ -286,7 +297,11 @@ def load_compatible_weights(model: nn.Module, path: str | Path) -> Dict[str, int
     }
     mismatched = sum(1 for key, value in source.items() if key in target and target[key].shape != value.shape)
     model.load_state_dict(compatible, strict=False)
-    backbone_keys = {key for key in target if not key.startswith("cot_adapter.")}
+    backbone_keys = {
+        key
+        for key in target
+        if not key.startswith(("cot_adapter.", "order_conditioner."))
+    }
     loaded_backbone = backbone_keys.intersection(compatible)
     return {
         "loaded": len(compatible),
@@ -404,9 +419,41 @@ def make_loader(
     return DataLoader(**kwargs)
 
 
+def has_order_conditioner(model: nn.Module) -> bool:
+    return hasattr(unwrap_model(model), "order_conditioner")
+
+
+def order_ids_from_batch(
+    batch,
+    mode: str,
+    device: torch.device,
+    begin: int = 0,
+    end: int | None = None,
+) -> Tensor:
+    if "formation_order" not in batch:
+        raise RuntimeError("Order-conditioned training requires formation_order labels")
+    names = list(batch["formation_order"])[begin:end]
+    if mode == "fixed":
+        return torch.zeros(len(names), dtype=torch.long, device=device)
+    if mode != "true":
+        raise ValueError(f"Unknown order condition mode: {mode}")
+    invalid = [name for name in names if name not in {"low>haze", "haze>low"}]
+    if invalid:
+        raise RuntimeError(f"Unexpected formation order labels: {invalid}")
+    return torch.tensor(
+        [0 if name == "low>haze" else 1 for name in names],
+        dtype=torch.long,
+        device=device,
+    )
+
+
 @torch.no_grad()
 def validate(
-    model: nn.Module, loader: DataLoader, device: torch.device, use_amp: bool
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    use_amp: bool,
+    order_condition_mode: str = "fixed",
 ) -> Dict[str, float]:
     validation_model = unwrap_model(model)
     validation_model.eval()
@@ -435,6 +482,12 @@ def validate(
                 degradation_targets.append(labels.float().cpu().numpy())
                 label_count += labels.numel()
                 gate_sum += auxiliary["gate_mean_abs"].float().mean().item() * lq.shape[0]
+            elif has_order_conditioner(validation_model):
+                order_ids = order_ids_from_batch(
+                    batch, order_condition_mode, device
+                )
+                prediction = validation_model(lq, order_ids)
+                bce = torch.zeros((), device=device)
             else:
                 prediction, bce = validation_model(lq), torch.zeros((), device=device)
         mse = (prediction.clamp(0, 1).float() - gt.float()).square().mean(dim=(1, 2, 3))
@@ -504,6 +557,7 @@ def checkpoint_payload(
         "model_type": args.model,
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
+        "order_hidden": args.order_hidden,
         "use_skip_gates": args.skip_gates,
         "use_multiscale_degradation": args.multi_scale_degradation,
         "args": vars(args),
@@ -524,6 +578,7 @@ def model_only_checkpoint_payload(
         "model_type": args.model,
         "preset": args.preset,
         "adapter_hidden": args.adapter_hidden,
+        "order_hidden": args.order_hidden,
         "use_skip_gates": args.skip_gates,
         "use_multiscale_degradation": args.multi_scale_degradation,
         "args": vars(args),
@@ -690,6 +745,15 @@ def main() -> None:
             "The preregistered one-shot Group DRO control does not support resume, "
             "because its group-weight trajectory must start from [0.5, 0.5]."
         )
+    if args.order_hidden < 2:
+        raise ValueError("order-hidden must be at least 2")
+    if args.model == "order_conditioned" and (
+        args.training_data != "synthetic_order" or args.order_policy != "balanced"
+    ):
+        raise ValueError(
+            "The privileged-order diagnostic requires synthetic_order with "
+            "order_policy=balanced"
+        )
     if (
         args.training_data == "synthetic_order"
         and args.order_policy == "balanced"
@@ -757,10 +821,10 @@ def main() -> None:
         )
 
     if args.training_data == "synthetic_order":
-        if args.model != "baseline":
+        if args.model not in {"baseline", "order_conditioned"}:
             raise ValueError(
-                "The preregistered order controls use the baseline model only; "
-                "do not add an adapter before the causal control is resolved."
+                "Synthetic order controls permit only baseline or the matched "
+                "order-conditioned diagnostic model."
             )
         train_set = OrderControlDataset(
             data_root,
@@ -884,6 +948,7 @@ def main() -> None:
         args.adapter_hidden,
         use_skip_gates=args.skip_gates,
         use_multiscale_degradation=args.multi_scale_degradation,
+        order_hidden=args.order_hidden,
     ).to(device)
     parameter_counts = count_parameters(model)
     if is_main:
@@ -1011,9 +1076,19 @@ def main() -> None:
         print("Single-process training enabled")
 
     # Cheap preflight catches tensor/channel mistakes before a long Kaggle run.
-    sample = train_set[0]["lq"][None].to(device)
+    preflight_sample = train_set[0]
+    sample = preflight_sample["lq"][None].to(device)
     with torch.no_grad(), amp_context(device, use_amp):
-        probe = model(sample)
+        if has_order_conditioner(model):
+            preflight_batch = {
+                "formation_order": [preflight_sample["formation_order"]]
+            }
+            preflight_order_ids = order_ids_from_batch(
+                preflight_batch, args.order_condition_mode, device
+            )
+            probe = model(sample, preflight_order_ids)
+        else:
+            probe = model(sample)
     finite_flag = torch.tensor(
         [int(torch.isfinite(probe).all())], dtype=torch.int32, device=device
     )
@@ -1029,7 +1104,10 @@ def main() -> None:
         args.amp = False
         scaler = make_grad_scaler(False)
         with torch.no_grad(), amp_context(device, False):
-            probe = model(sample)
+            if has_order_conditioner(model):
+                probe = model(sample, preflight_order_ids)
+            else:
+                probe = model(sample)
     valid_probe = probe.shape == sample.shape and bool(torch.isfinite(probe).all())
     valid_probe_flag = torch.tensor([int(valid_probe)], dtype=torch.int32, device=device)
     if distributed:
@@ -1053,7 +1131,9 @@ def main() -> None:
                 "deterministic_order_control": args.training_data == "synthetic_order",
             },
         )
-    del sample, probe
+    del sample, probe, preflight_sample
+    if "preflight_order_ids" in locals():
+        del preflight_order_ids
     if device.type == "cuda":
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device)
@@ -1167,6 +1247,17 @@ def main() -> None:
                                     labels.float(),
                                     pos_weight=degradation_pos_weight,
                                 )
+                            elif has_order_conditioner(model):
+                                order_ids = order_ids_from_batch(
+                                    batch,
+                                    args.order_condition_mode,
+                                    device,
+                                    begin,
+                                    end,
+                                )
+                                prediction = model(lq, order_ids)
+                                degradation = torch.zeros((), device=device)
+                                auxiliary = {}
                             else:
                                 prediction = model(lq)
                                 degradation = torch.zeros((), device=device)
@@ -1261,6 +1352,8 @@ def main() -> None:
                     )
                     if args.group_dro:
                         del per_sample_restoration, group_ids
+                    if "order_ids" in locals():
+                        del order_ids
                 scaler.unscale_(optimizer)
                 if not backbone_trainable:
                     clear_backbone_gradients(model)
@@ -1347,7 +1440,13 @@ def main() -> None:
                 flush=True,
             )
             assert val_loader is not None
-            last_validation = validate(model, val_loader, device, use_amp)
+            last_validation = validate(
+                model,
+                val_loader,
+                device,
+                use_amp,
+                args.order_condition_mode,
+            )
         metric_keys = (
             "psnr",
             "bce",

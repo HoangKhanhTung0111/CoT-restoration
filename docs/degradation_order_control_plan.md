@@ -162,3 +162,42 @@ toàn trước khi so sánh.
 Ngưỡng cải thiện thực dụng `0,2 dB` và equivalence margin `0,1 dB` vẫn chỉ là cổng
 quản lý pilot. Dù kết quả thuộc nhánh nào, năm scene và một cặp synthetic low+haze
 không đủ cho claim tổng quát hay contribution công bố.
+
+## Kết quả Group DRO và oracle thứ tự được đăng ký trước
+
+Group DRO không khắc phục khoảng cách specialist: nó chỉ chuyển chất lượng
+giữa hai order (xấp xỉ `+0,286 dB` trên A và `-0,289 dB` trên B), thay đổi
+trung bình gần `-0,001 dB`, và cải thiện worst-order `+0,182 dB` có CI95%
+chứa 0. Khoảng cách tới specialist vẫn xấp xỉ `1,149 dB`. Vì vậy nhánh
+robust-objective đơn giản được đóng.
+
+Phép thử tiếp theo là một **privileged-information oracle diagnostic**, không
+phải phương pháp AiOIR triển khai được và không tự nó là contribution:
+
+1. Hai model cùng `NAFNet-SIDD-width32`, conditioner, zero initialization, seed,
+   dữ liệu, 20 epoch, loss, số update và quy tắc chọn checkpoint theo mean
+   validation PSNR.
+2. `True-order` nhận nhãn generator A/B thật. `Fixed-code` luôn nhận mã 0.
+   Đây là khác biệt duy nhất giữa hai run.
+3. Conditioner dùng embedding nhị phân và affine modulation bị chặn biên độ
+   trên bottleneck/các skip. Lớp affine được zero-init nên cả hai model
+   bắt đầu đúng bằng hàm NAFNet pretrained.
+4. Reference Fixed-A/Fixed-B/Balanced được khóa trong
+   `configs/order_controls_reference_20260920.json`; không huấn luyện lại và không
+   cần upload ZIP cũ.
+
+### Cổng quyết định
+
+- **Oracle thành công đầy đủ:** `True-order - Fixed-code` trung bình ít nhất
+  `0,2 dB`, CI95% scene-clustered có cận dưới lớn hơn 0, worst-order không
+  suy giảm quá `0,1 dB`, và cận trên CI95% của khoảng cách specialist
+  không vượt `0,1 dB`. Dừng GPU, audit novelty/cơ chế; chỉ sau đó mới
+  cho phép một phép thử predicted-order.
+- **Thành công một phần:** đạt cổng lợi ích và an toàn nhưng chưa đóng
+  gap specialist. Dừng GPU và audit novelty/cơ chế; không tự động huấn
+  predictor.
+- **Thất bại:** không đạt cổng lợi ích/an toàn. Đóng formation-order như
+  contribution chính và không cứu bằng sweep hay module khác.
+
+Toàn bộ kết quả vẫn chỉ là exploratory pilot vì có năm validation scene và
+một cặp suy hao synthetic. Test split tiếp tục bị khóa ở cả ba nhánh.

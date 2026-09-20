@@ -135,6 +135,8 @@ def training_command(
         "synthetic_val_realizations",
         "generation_seed",
         "group_dro_eta",
+        "order_hidden",
+        "order_condition_mode",
     ):
         if key in run:
             command.extend((f"--{key.replace('_', '-')}", str(run[key])))

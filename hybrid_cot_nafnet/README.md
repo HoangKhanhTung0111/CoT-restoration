@@ -23,12 +23,22 @@ single Kaggle GPU. It does not modify or import the BasicSR copy under `NAFNet/`
   controls with scene-clustered intervals and preregistered contrasts.
 - `evaluate_group_dro_control.py`: evaluates the one robust-training control
   against the locked per-sample result ZIP from the three earlier controls.
+- `evaluate_order_condition_oracle.py`: compares privileged true-order
+  conditioning with an architecture-matched fixed-code control and the locked
+  Fixed-A/Fixed-B/Balanced per-sample reference.
 - `audit_order_control_data.py`: read-only pretraining gate for scene separation,
   equal update budgets, and paired A/B realization invariants.
 
 The research path uses the same spatial crop and augmentation for two different
 degradation views of one scene. Set `--content-weight 0` to disable this branch
 for its ablation. Use `--no-skip-gates` for the bottleneck-only ablation.
+
+The bounded privileged-order diagnostic is defined in
+`configs/order_condition_oracle_low_haze.json`. Run it through the dedicated
+Kaggle notebook; it executes exactly the true-code and fixed-code runs and then
+calls `evaluate_order_condition_oracle`. The locked earlier-control reference
+is versioned in `configs/order_controls_reference_20260920.json`, so no result
+archive from an older Kaggle session is an input.
 
 ## Local smoke checks
 
