@@ -1,4 +1,4 @@
-"""Bounded CDD-11 smoke audit. Never trains or evaluates sealed partitions."""
+"""CDD-11 smoke and discovery audits. Never trains or evaluates sealed partitions."""
 from __future__ import annotations
 
 import argparse
@@ -213,13 +213,13 @@ def load_model(name, work, device):
     return forward
 
 
-def smoke(name, work, scenes):
+def evaluate(name, work, scenes, full_discovery=False):
     import torch
     import torch.nn.functional as F
     from skimage.metrics import structural_similarity
     if not torch.cuda.is_available():
         raise RuntimeError('Real-model smoke requires Kaggle GPU; CPU tests are separate')
-    if not 1 <= scenes <= 5:
+    if not full_discovery and not 1 <= scenes <= 5:
         raise ValueError('Smoke is limited to 1..5 discovery scenes')
     device = torch.device('cuda:0')
     torch.manual_seed(20260923)
@@ -227,17 +227,20 @@ def smoke(name, work, scenes):
     torch.backends.cudnn.allow_tf32 = False
     manifest = json.loads((work / 'manifest.json').read_text())
     root = Path(manifest['root'])
-    selected = [r for r in manifest['scenes'] if r['partition'] == 'discovery'][:scenes]
-    output = work / 'results' / name
+    selected = [r for r in manifest['scenes'] if r['partition'] == 'discovery']
+    if not full_discovery:
+        selected = selected[:scenes]
+    groups = GROUPS if full_discovery else SMOKE_GROUPS
+    output = work / ('discovery' if full_discovery else 'results') / name
     output.mkdir(parents=True, exist_ok=True)
     rows = []
     save_json(output / 'status.json', {'status': 'running', 'model': name})
     forward = load_model(name, work, device)
     with torch.inference_mode():
-        for row in selected:
+        for scene_index, row in enumerate(selected):
             with Image.open(root / 'clear' / row['file']) as image:
                 gt = np.asarray(image.convert('RGB'), dtype=np.float32) / 255
-            for group in SMOKE_GROUPS:
+            for group in groups:
                 with Image.open(root / group / row['file']) as image:
                     pil = image.convert('RGB')
                 arr = np.asarray(pil, dtype=np.float32) / 255
@@ -256,23 +259,29 @@ def smoke(name, work, scenes):
                 raw = pred[0, :, :h, :w].permute(1, 2, 0).cpu().numpy()
                 restored = raw.clip(0, 1)
                 mse = float(np.mean((restored - gt)**2, dtype=np.float64))
-                rows.append({'scene': row['scene'], 'group': group, 'psnr': -10*math.log10(max(mse, 1e-15)),
+                rows.append({'scene': row['scene'], 'group': group, 'input_psnr': -10*math.log10(
+                                 max(float(np.mean((arr - gt)**2, dtype=np.float64)), 1e-15)),
+                             'psnr': -10*math.log10(max(mse, 1e-15)),
                              'ssim': float(structural_similarity(gt, restored, data_range=1., channel_axis=-1)),
                              'seconds': seconds, 'peak_vram_bytes': torch.cuda.max_memory_allocated(),
                              'output_min': float(raw.min()), 'output_max': float(raw.max()), 'size': [w, h]})
-                panel = np.concatenate([arr, restored, gt], axis=1)
-                Image.fromarray((panel.clip(0, 1)*255).round().astype('uint8')).save(output / f"{row['scene']}_{group}.png")
+                save_panel = (scene_index < 3 if not full_discovery else
+                              scene_index == 0 or (scene_index < 3 and group in ('rain', 'low_haze_snow')))
+                if save_panel:
+                    panel = np.concatenate([arr, restored, gt], axis=1)
+                    Image.fromarray((panel.clip(0, 1)*255).round().astype('uint8')).save(output / f"{row['scene']}_{group}.png")
                 save_json(output / 'metrics.json', rows)
                 print(name, rows[-1], flush=True)
     save_json(output / 'status.json', {'status': 'complete', 'model': name, 'images': len(rows),
               'torch': torch.__version__, 'gpu': torch.cuda.get_device_name(),
               'manifest_sha256': sha256(work / 'manifest.json'),
-              'protocol': 'smoke_only_fp32_rgb_clamp01_ssim_skimage_default_pad8; timings include cold start, not benchmark'})
+              'protocol': ('discovery_all11' if full_discovery else 'smoke_only') +
+              '_fp32_rgb_clamp01_ssim_skimage_default_pad8; timings include cold start, not benchmark'})
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'smoke'])
+    parser.add_argument('action', choices=['prepare', 'smoke', 'audit'])
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--model', choices=list(REPOS), default='onerestore')
     parser.add_argument('--scenes', type=int, default=3)
@@ -280,7 +289,7 @@ def main():
     if args.action == 'prepare':
         prepare(args.work.resolve())
     else:
-        smoke(args.model, args.work.resolve(), args.scenes)
+        evaluate(args.model, args.work.resolve(), args.scenes, full_discovery=args.action == 'audit')
 
 
 if __name__ == '__main__':
