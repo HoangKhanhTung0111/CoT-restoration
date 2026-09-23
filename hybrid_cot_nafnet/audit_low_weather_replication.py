@@ -268,13 +268,19 @@ def _region_metrics(inputs: dict[str, np.ndarray], outputs: dict[str, np.ndarray
     q = output_mse["combined"] - max(output_mse["low"], output_mse["weather"])
     q_cal = calibrated_mse["combined"] - max(calibrated_mse["low"], calibrated_mse["weather"])
     max_component = max(output_mse["low"], output_mse["weather"])
-    p = 10 * math.log10(output_mse["combined"] / max_component) if max_component > 0 else None
+    p = (10 * math.log10(output_mse["combined"] / max_component)
+         if output_mse["combined"] > 0 and max_component > 0 else None)
     max_cal_component = max(calibrated_mse["low"], calibrated_mse["weather"])
     p_cal = (10 * math.log10(calibrated_mse["combined"] / max_cal_component)
-             if max_cal_component > 0 else None)
+             if calibrated_mse["combined"] > 0 and max_cal_component > 0 else None)
+    p_reason = ("zero_composite_mse" if output_mse["combined"] == 0 else
+                "zero_component_mse" if max_component == 0 else None)
+    p_cal_reason = ("zero_calibrated_composite_mse" if calibrated_mse["combined"] == 0 else
+                    "zero_calibrated_component_mse" if max_cal_component == 0 else None)
     return {"input_mse": input_mse, "output_mse": output_mse,
             "calibrated_mse": calibrated_mse, "remaining_error_fraction": fractions,
-            "D": d, "Q": q, "P_db": p, "Q_cal": q_cal, "P_cal_db": p_cal,
+            "D": d, "Q": q, "P_db": p, "P_reason": p_reason,
+            "Q_cal": q_cal, "P_cal_db": p_cal, "P_cal_reason": p_cal_reason,
             "Q_minus_Q_cal": q - q_cal}
 
 

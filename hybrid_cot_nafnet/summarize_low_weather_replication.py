@@ -118,6 +118,14 @@ def _validate_metrics(manifest: dict, fixture: dict, run: dict,
                     if field.startswith("mse") or field.startswith("output_mse"):
                         if value < 0:
                             raise SummaryError(f"{model}/{key}/{view}: negative {field}")
+                expected_psnr = (-10*math.log10(item["output_mse_full"])
+                                 if item["output_mse_full"] > 0 else None)
+                if expected_psnr is None:
+                    if item.get("psnr_full") is not None or item.get("psnr_reason") != "perfect_reconstruction":
+                        raise SummaryError(f"{model}/{key}/{view}: perfect PSNR must be null with a reason")
+                elif (item.get("psnr_reason") is not None or item.get("psnr_full") is None
+                      or not np.isclose(item["psnr_full"], expected_psnr, rtol=1e-9, atol=1e-10)):
+                    raise SummaryError(f"{model}/{key}/{view}: PSNR formula mismatch")
                 oracle = item.get("oracle")
                 if not isinstance(oracle, dict) or len(oracle.get("gain", [])) != 3 or len(oracle.get("bias", [])) != 3:
                     raise SummaryError(f"{model}/{key}/{view}: missing per-channel affine oracle")
@@ -126,8 +134,8 @@ def _validate_metrics(manifest: dict, fixture: dict, run: dict,
                 if oracle.get("calibrated_mse_full", oracle.get("raw_mse_full", 0)) > oracle.get("raw_mse_full", 0) + 1e-10:
                     raise SummaryError(f"{model}/{key}/{view}: affine full MSE increased")
             if set(row.get("full", {})) != {"input_mse", "output_mse", "calibrated_mse",
-                                             "remaining_error_fraction", "D", "Q", "P_db", "Q_cal",
-                                             "P_cal_db", "Q_minus_Q_cal"}:
+                                             "remaining_error_fraction", "D", "Q", "P_db", "P_reason",
+                                             "Q_cal", "P_cal_db", "P_cal_reason", "Q_minus_Q_cal"}:
                 raise SummaryError(f"{model}/{key}: malformed full region metrics")
             for region in REGIONS:
                 block = row.get(region)
@@ -150,9 +158,9 @@ def _validate_metrics(manifest: dict, fixture: dict, run: dict,
                 raw_max = max(block["output_mse"]["low"], block["output_mse"]["weather"])
                 cal_max = max(block["calibrated_mse"]["low"], block["calibrated_mse"]["weather"])
                 expected_p = (10 * math.log10(block["output_mse"]["combined"] / raw_max)
-                              if raw_max > 0 else None)
+                              if block["output_mse"]["combined"] > 0 and raw_max > 0 else None)
                 expected_p_cal = (10 * math.log10(block["calibrated_mse"]["combined"] / cal_max)
-                                  if cal_max > 0 else None)
+                                  if block["calibrated_mse"]["combined"] > 0 and cal_max > 0 else None)
                 for name, expected in (("P_db", expected_p), ("P_cal_db", expected_p_cal),
                                        ("Q_minus_Q_cal", expected_q-expected_q_cal)):
                     actual = block.get(name)
@@ -162,6 +170,13 @@ def _validate_metrics(manifest: dict, fixture: dict, run: dict,
                     elif not isinstance(actual, (int, float)) or not np.isclose(
                             actual, expected, rtol=1e-9, atol=1e-12):
                         raise SummaryError(f"{model}/{key}/{region}: {name} formula mismatch")
+                for name, value, reason_key in (("P_db", expected_p, "P_reason"),
+                                                ("P_cal_db", expected_p_cal, "P_cal_reason")):
+                    reason = block.get(reason_key)
+                    if value is None and not isinstance(reason, str):
+                        raise SummaryError(f"{model}/{key}/{region}: null {name} must have a reason")
+                    if value is not None and reason is not None:
+                        raise SummaryError(f"{model}/{key}/{region}: unexpected {reason_key}")
                 fractions = block["remaining_error_fraction"]
                 for view in ("low", "weather", "combined"):
                     denom = block["input_mse"][view]
