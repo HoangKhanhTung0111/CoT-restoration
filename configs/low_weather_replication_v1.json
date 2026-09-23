@@ -1,0 +1,58 @@
+{
+  "protocol_version": "low-weather-replication-v1.1",
+  "manifest_fixture": "configs/low_weather_replication/manifest_fixture.json",
+  "expected_partition_counts": {
+    "discovery": 78,
+    "confirmation": 39,
+    "holdout": 78
+  },
+  "models": ["onerestore", "mirage"],
+  "generators": ["A", "B"],
+  "groups": ["low", "haze", "rain", "snow", "low_haze", "low_rain", "low_snow", "haze_rain", "haze_snow", "low_haze_rain", "low_haze_snow"],
+  "weathers": ["rain_haze", "snow_haze"],
+  "strengths": {
+    "weak": 0.5,
+    "strong": 0.2
+  },
+  "generator_a": {
+    "base_seed": 20260923,
+    "realization": 0,
+    "low_levels": [0.6, 1.0],
+    "quantization": "rgb_uint8_round_once"
+  },
+  "generator_b": {
+    "version": "cvpr2027-generator-b-v1",
+    "seed": "first_8_bytes_sha256_little_endian",
+    "bit_generator": "numpy.random.PCG64",
+    "low_k": 0.001,
+    "read_noise_sigma": 0.002,
+    "haze_airlight_uniform": [0.75, 0.95],
+    "haze_transmission_uniform": [0.55, 0.9],
+    "rain_density": 0.002,
+    "snow_density": 0.0005,
+    "precipitation_color": 0.9,
+    "max_alpha": 0.45
+  },
+  "metrics": {
+    "regions": ["full", "inner32"],
+    "inner_border_pixels": 32,
+    "ssim": "skimage structural_similarity(data_range=1, channel_axis=-1; library defaults)",
+    "bootstrap_samples": 10000,
+    "bootstrap_seed": 20260923,
+    "bootstrap_quantile": "linear"
+  },
+  "screen": {
+    "primary_strength": "strong",
+    "conditions": 8,
+    "minimum_q_positive_scenes": 24,
+    "q_mean_ci95_lower_strictly_above": 0.0,
+    "q_inner_mean_strictly_above": 0.0,
+    "p_mean_db_at_least": 0.3
+  },
+  "runtime_budget_gpu_hours": 4.0,
+  "max_confirmation_scenes": 39,
+  "max_discovery_smoke_scenes": 3,
+  "max_expected_confirmation_metric_rows": 624,
+  "max_expected_confirmation_forwards": 1404,
+  "disclaimer": "Synthetic stress test, not calibrated real-night physics; S1 is descriptive and does not establish a restoration mechanism or novelty."
+}

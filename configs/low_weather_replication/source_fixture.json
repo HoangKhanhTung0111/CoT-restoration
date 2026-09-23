@@ -1,0 +1,26 @@
+{
+    "repos":  {
+                  "onerestore":  {
+                                     "repo":  "gy65896/OneRestore",
+                                     "revision":  "23a2e6af066864dca013aeed7f6c6f5958aa7259"
+                                 },
+                  "mirage":  {
+                                 "repo":  "Amazingren/MIRAGE",
+                                 "revision":  "926dc83646272a0d99b36f4bff496985ab064795"
+                             }
+              },
+    "weights":  {
+                    "onerestore_cdd-11.tar":  {
+                                                  "path":  "/kaggle/working/low_weather_counterfactual/downloads/onerestore_cdd-11.tar",
+                                                  "sha256":  "e02e2d87ce56740a9bedb5cffe8b129d3b206590ae3b97050c9b53aa549c7c9f"
+                                              },
+                    "embedder_model.tar":  {
+                                               "path":  "/kaggle/working/low_weather_counterfactual/downloads/embedder_model.tar",
+                                               "sha256":  "01c1ed1fe4fd06a73c78a7d1fac1b4092a098f3ea08bc71bcab1e4fdad7f6ec2"
+                                           },
+                    "CDD11_small.ckpt":  {
+                                             "path":  "/kaggle/working/low_weather_counterfactual/downloads/CDD11_small.ckpt",
+                                             "sha256":  "6a8216710c80e07af50ee82f96203dc64a3daaddf7c6b6cfc72819a7e6f1ac02"
+                                         }
+                }
+}
