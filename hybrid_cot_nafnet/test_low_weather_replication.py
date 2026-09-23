@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +18,9 @@ from .audit_low_weather_replication import (
     manifest_from_fixture, unique_scene_views, validate_manifest,
 )
 from .summarize_low_weather_replication import _a_seed, _boot_ratio, _paired_indices, screen_condition
-from .summarize_low_weather_replication import _validate_metrics, summarize as summarize_s1
+from .summarize_low_weather_replication import (
+    _validate_metrics, summarize as summarize_s1, summarize_archive,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -209,6 +213,28 @@ class ReplicationProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _validate_metrics(manifest, FIXTURE, run, protocol, sources,
                               SOURCE_FIXTURE, statuses, metrics)
+
+    def test_archive_cli_path_validates_and_writes_report(self):
+        manifest, run, protocol, sources, statuses, metrics, _ = self._fake_archive_payload()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive_path = root / "synthetic_s1.zip"
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                payload = {"run.json": run, "protocol.json": protocol,
+                           "manifest.json": manifest, "sources.json": sources,
+                           "manifest_fixture.json": FIXTURE,
+                           "source_fixture.json": SOURCE_FIXTURE}
+                for name, value in payload.items():
+                    archive.writestr(name, json.dumps(value))
+                for model in ("onerestore", "mirage"):
+                    archive.writestr(f"s1/confirmation/{model}/status.json",
+                                    json.dumps(statuses[model]))
+                    archive.writestr(f"s1/confirmation/{model}/metrics.json",
+                                    json.dumps(metrics[model]))
+            result = summarize_archive(archive_path, root / "summary.json", root / "summary.md")
+            self.assertEqual(result["status"], "PASS_REPLICATION")
+            self.assertTrue((root / "summary.json").is_file())
+            self.assertIn("PASS_REPLICATION", (root / "summary.md").read_text(encoding="utf-8"))
         manifest, run, protocol, sources, statuses, metrics, _ = self._fake_archive_payload()
         metrics["mirage"][0]["input_sha256"]["combined"] = "different"
         with self.assertRaises(ValueError):
