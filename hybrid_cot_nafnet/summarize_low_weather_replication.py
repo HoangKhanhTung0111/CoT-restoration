@@ -46,6 +46,8 @@ def _validate_metrics(manifest: dict, fixture: dict, run: dict,
     commit = run.get("project_code_commit")
     if not isinstance(commit, str) or len(commit) != 40:
         raise SummaryError("Missing pinned project code commit")
+    if protocol.get("project_code_commit") != commit:
+        raise SummaryError("Protocol and run metadata do not share the same pinned code commit")
     if protocol.get("protocol_version") != "low-weather-replication-v1.1":
         raise SummaryError("Unexpected protocol version")
     if protocol.get("manifest_fixture_sha256") != fixture.get("source_manifest_sha256"):

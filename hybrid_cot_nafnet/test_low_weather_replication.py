@@ -131,7 +131,8 @@ class ReplicationProtocolTests(unittest.TestCase):
                                                          "low_haze_rain", "low_haze_snow"])
         commit = "a" * 40
         protocol = {"protocol_version": "low-weather-replication-v1.1",
-                    "manifest_fixture_sha256": FIXTURE["source_manifest_sha256"]}
+                    "manifest_fixture_sha256": FIXTURE["source_manifest_sha256"],
+                    "project_code_commit": commit}
         sources = {"repos": SOURCE_FIXTURE["repos"],
                    "weights": {name: {"path": "fixture", "sha256": row["sha256"]}
                                for name, row in SOURCE_FIXTURE["weights"].items()}}
