@@ -15,7 +15,7 @@ from .audit_degradation_order import _stable_seed, apply_order, build_realizatio
 from .audit_low_weather_interaction import LOW_LEVELS, WEATHERS, apply_low, make_views
 from .audit_low_weather_replication import (
     _fit_affine_oracle, _psnr, estimate_confirmation_gpu_hours,
-    manifest_from_fixture, unique_scene_views, validate_manifest,
+    manifest_from_fixture, unique_scene_views, validate_fixture_files, validate_manifest,
 )
 from .summarize_low_weather_replication import _a_seed, _boot_ratio, _paired_indices, screen_condition
 from .summarize_low_weather_replication import (
@@ -46,6 +46,21 @@ class ReplicationProtocolTests(unittest.TestCase):
             validate_manifest(manifest, FIXTURE, "holdout", 0)
         with self.assertRaises(ValueError):
             validate_manifest(manifest, FIXTURE, "confirmation", 3)
+
+    def test_fixture_files_are_resolved_below_clear_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            clear = root / "clear"
+            clear.mkdir()
+            records = FIXTURE["scene_records"]
+            for record in records:
+                (clear / record[1]).touch()
+            validate_fixture_files(root, FIXTURE)
+            missing = clear / records[0][1]
+            missing.unlink()
+            with self.assertRaises(FileNotFoundError) as caught:
+                validate_fixture_files(root, FIXTURE)
+            self.assertEqual(caught.exception.args[0], missing)
 
     def test_a_wrapper_is_pixel_equal_to_frozen_generator(self):
         from .audit_low_weather_replication import _a_views

@@ -80,6 +80,14 @@ def manifest_from_fixture(fixture: dict, root: Path, groups: list[str]) -> dict:
             "fixture_source_manifest_sha256": fixture["source_manifest_sha256"]}
 
 
+def validate_fixture_files(root: Path, fixture: dict) -> None:
+    """Confirm that every locked clean scene exists below the CDD-11 clear directory."""
+    for row in _fixture_records(fixture):
+        path = root / "clear" / row["file"]
+        if not path.is_file():
+            raise FileNotFoundError(path)
+
+
 def validate_manifest(manifest: dict, fixture: dict, partition: str,
                       max_scenes: int = 0) -> list[dict]:
     expected = _fixture_records(fixture)
@@ -340,9 +348,7 @@ def prepare(work: Path, project: Path, fixture_path: Path, source_fixture_path: 
         raise ProtocolError(f"Expected one CDD-11 clear directory; found {roots}")
     groups = list(_load_json(project / "configs/low_weather_replication_v1.json")["groups"])
     manifest = manifest_from_fixture(fixture, roots[0], groups)
-    for row in _fixture_records(fixture):
-        if not (roots[0] / row["file"]).is_file():
-            raise FileNotFoundError(roots[0] / row["file"])
+    validate_fixture_files(roots[0], fixture)
     manifest_path = work / "manifest.json"
     if manifest_path.exists() and _load_json(manifest_path) != manifest:
         raise ProtocolError("Existing manifest differs from the locked S1 fixture")
