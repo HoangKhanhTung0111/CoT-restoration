@@ -109,6 +109,7 @@ class ReplicationProtocolTests(unittest.TestCase):
         statuses = {model: {"status": "complete", "partition": "discovery",
                             "scene_count": 3, "unique_forward_count": 54,
                             "warmup_forward_count_per_generator": 3,
+                            "wall_seconds": 54.0,
                             "generator_seconds": {name: [1.0] * 27 for name in ("A", "B")}}
                     for model in ("onerestore", "mirage")}
         estimate = estimate_confirmation_gpu_hours(statuses)

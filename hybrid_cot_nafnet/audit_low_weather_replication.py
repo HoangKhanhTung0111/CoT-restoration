@@ -536,10 +536,11 @@ def evaluate(work: Path, model_name: str, partition: str, max_scenes: int = 0,
 
 
 def estimate_confirmation_gpu_hours(discovery_statuses: dict[str, dict], *, safety_factor: float = 1.3):
-    """Conservative screen using per-generator p90 measured after 3 warmup forwards."""
+    """Estimate from post-warmup p90 forwards and complete smoke wall time."""
     if set(discovery_statuses) != set(MODELS):
         raise ProtocolError("Runtime estimate needs smoke statuses for both models")
-    total_seconds = 0.0
+    forward_seconds = 0.0
+    scaled_wall_seconds = 0.0
     detail = {}
     for model_name in MODELS:
         status = discovery_statuses[model_name]
@@ -549,6 +550,10 @@ def estimate_confirmation_gpu_hours(discovery_statuses: dict[str, dict], *, safe
             raise ProtocolError(f"Smoke forward count differs for {model_name}")
         if status.get("warmup_forward_count_per_generator") != 3:
             raise ProtocolError(f"Smoke warmup count is missing for {model_name}")
+        smoke_wall = status.get("wall_seconds")
+        if not isinstance(smoke_wall, (int, float)) or not math.isfinite(smoke_wall) or smoke_wall <= 0:
+            raise ProtocolError(f"Smoke end-to-end wall time is missing for {model_name}")
+        scaled_wall_seconds += float(smoke_wall) * 13.0
         for generator_name in GENERATORS:
             values = status.get("generator_seconds", {}).get(generator_name)
             if not isinstance(values, list) or len(values) != 27:
@@ -562,10 +567,16 @@ def estimate_confirmation_gpu_hours(discovery_statuses: dict[str, dict], *, safe
             detail[f"{model_name}/{generator_name}"] = {
                 "post_warmup_count": int(measured.size), "p90_forward_seconds": p90,
                 "confirmation_forwards": 351, "estimated_seconds": seconds}
-            total_seconds += seconds
-    estimate = total_seconds * safety_factor / 3600.0
+            forward_seconds += seconds
+    projected_before_buffer = max(forward_seconds, scaled_wall_seconds)
+    estimate = projected_before_buffer * safety_factor / 3600.0
     return {"estimate_gpu_hours": estimate, "safety_factor": safety_factor,
-            "estimated_total_forwards": 1404, "groups": detail}
+            "estimated_total_forwards": 1404,
+            "forward_p90_projection_seconds": forward_seconds,
+            "smoke_wall_scaled_projection_seconds": scaled_wall_seconds,
+            "projection_before_buffer_seconds": projected_before_buffer,
+            "projection_after_buffer_seconds": projected_before_buffer*safety_factor,
+            "groups": detail}
 
 
 def main():
