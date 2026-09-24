@@ -137,6 +137,10 @@ def training_command(
         "group_dro_eta",
         "order_hidden",
         "order_condition_mode",
+        "s2b_manifest",
+        "s2b_cache_root",
+        "s2b_fold",
+        "samples_per_epoch",
     ):
         if key in run:
             command.extend((f"--{key.replace('_', '-')}", str(run[key])))

@@ -30,7 +30,10 @@ if __package__ in {None, ""}:
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from hybrid_cot_nafnet.datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from hybrid_cot_nafnet.datasets import (
+        CDD11Dataset, DEGRADATIONS, S2BCoverageDataset,
+        find_cdd11_root, find_cdd11_train_dir, load_cv_manifest,
+    )
     from hybrid_cot_nafnet.datasets.order_controls import OrderControlDataset
     from hybrid_cot_nafnet.degradation_metrics import (
         flattened_degradation_metrics,
@@ -42,7 +45,10 @@ if __package__ in {None, ""}:
         pretrained_path_for_preset,
     )
 else:
-    from .datasets import CDD11Dataset, DEGRADATIONS, find_cdd11_root
+    from .datasets import (
+        CDD11Dataset, DEGRADATIONS, S2BCoverageDataset,
+        find_cdd11_root, find_cdd11_train_dir, load_cv_manifest,
+    )
     from .datasets.order_controls import OrderControlDataset
     from .degradation_metrics import (
         flattened_degradation_metrics,
@@ -80,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--training-data",
-        choices=("cdd11", "synthetic_order"),
+        choices=("cdd11", "synthetic_order", "s2b_r0", "s2b_r1"),
         default="cdd11",
         help="Use paired CDD-11 or the preregistered synthetic low+haze order control.",
     )
@@ -93,6 +99,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--synthetic-train-realizations", type=int, default=16)
     parser.add_argument("--synthetic-val-realizations", type=int, default=3)
     parser.add_argument("--generation-seed", type=int, default=20260920)
+    parser.add_argument(
+        "--s2b-manifest",
+        default="",
+        help="Locked 25-scene/5-fold S2b manifest; required by s2b_r0/s2b_r1.",
+    )
+    parser.add_argument("--s2b-fold", type=int, default=-1)
+    parser.add_argument(
+        "--s2b-cache-root",
+        default="",
+        help="Materialized Generator-B views; required by s2b_r1.",
+    )
+    parser.add_argument(
+        "--samples-per-epoch",
+        type=int,
+        default=0,
+        help="Exact global train forwards per epoch; S2b CV5 requires 220 for both arms.",
+    )
     parser.add_argument(
         "--group-dro",
         action=argparse.BooleanOptionalAction,
@@ -729,6 +752,30 @@ def main() -> None:
         raise ValueError("num-workers and save-every must be non-negative")
     if args.synthetic_train_realizations <= 0 or args.synthetic_val_realizations <= 0:
         raise ValueError("synthetic realization counts must be positive")
+    is_s2b = args.training_data in {"s2b_r0", "s2b_r1"}
+    if args.samples_per_epoch < 0:
+        raise ValueError("samples-per-epoch must be non-negative")
+    if is_s2b:
+        if args.model != "baseline":
+            raise ValueError("S2b null arms require the unchanged baseline model")
+        if not args.s2b_manifest:
+            raise ValueError("S2b null arms require --s2b-manifest")
+        if args.training_data == "s2b_r1" and not args.s2b_cache_root:
+            raise ValueError("s2b_r1 requires --s2b-cache-root")
+        if args.samples_per_epoch != 20 * 11:
+            raise ValueError("S2b CV5 locks both arms to 220 train forwards per epoch")
+        if not 0 <= args.s2b_fold < 5:
+            raise ValueError("S2b CV5 requires --s2b-fold in [0, 4]")
+        if any(
+            value != 0
+            for value in (
+                args.degradation_weight,
+                args.content_weight,
+                args.decorrelation_weight,
+                args.gate_weight,
+            )
+        ):
+            raise ValueError("S2b R0/R1 permit restoration losses only")
     if args.group_dro_eta <= 0:
         raise ValueError("group-dro-eta must be positive")
     if args.group_dro and (
@@ -799,7 +846,11 @@ def main() -> None:
     if hasattr(torch, "set_float32_matmul_precision"):
         torch.set_float32_matmul_precision("high")
 
-    data_root = find_cdd11_root(args.data_root)
+    data_root = (
+        find_cdd11_train_dir(args.data_root).parent
+        if is_s2b
+        else find_cdd11_root(args.data_root)
+    )
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     if is_main:
@@ -845,6 +896,39 @@ def main() -> None:
             val_fraction=args.val_fraction,
             split_seed=args.seed,
             generation_seed=args.generation_seed,
+        )
+        test_probe = None
+    elif is_s2b:
+        locked_manifest = load_cv_manifest(args.s2b_manifest)
+        selection = locked_manifest["selection"]
+        if (
+            selection.get("development_count") != 25
+            or selection.get("fold_count") != 5
+            or selection.get("train_count_per_fold") != 20
+            or selection.get("validation_count_per_fold") != 5
+        ):
+            raise RuntimeError("S2b CV5 requires 25 development scenes in five 20/5 folds")
+        arm = "r0" if args.training_data == "s2b_r0" else "r1"
+        train_set = S2BCoverageDataset(
+            data_root,
+            args.s2b_manifest,
+            args.s2b_cache_root or ".",
+            fold=args.s2b_fold,
+            split="train",
+            arm=arm,
+            crop_size=args.crop_size,
+            augment=True,
+        )
+        # Identical original-CDD validation and checkpoint selection for both arms.
+        val_set = S2BCoverageDataset(
+            data_root,
+            args.s2b_manifest,
+            args.s2b_cache_root or ".",
+            fold=args.s2b_fold,
+            split="validation",
+            arm="r0",
+            crop_size=args.val_crop_size,
+            augment=False,
         )
         test_probe = None
     else:
@@ -904,7 +988,11 @@ def main() -> None:
                 ),
             },
         )
-    global_sample_count = len(train_set) * max(1, args.patches_per_image)
+    global_sample_count = (
+        args.samples_per_epoch
+        if args.samples_per_epoch > 0
+        else len(train_set) * max(1, args.patches_per_image)
+    )
     if global_sample_count % world_size:
         raise ValueError("Sample count must be divisible by WORLD_SIZE")
     if args.training_data == "synthetic_order" and distributed:
@@ -957,7 +1045,7 @@ def main() -> None:
         if test_probe is not None:
             print(test_probe.summary())
         else:
-            print("CDD-11_test not loaded for synthetic order controls")
+            print("CDD-11 test split not loaded for the selected protocol")
         print(
             f"Model={args.model}/{args.preset} "
             f"total={parameter_counts['total']/1e6:.3f}M "

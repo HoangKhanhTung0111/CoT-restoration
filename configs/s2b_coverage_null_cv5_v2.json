@@ -1,0 +1,46 @@
+{
+  "shared": {
+    "preset": "sidd32",
+    "pretrained": "auto",
+    "adapter_hidden": 64,
+    "seed": 42,
+    "crop_size": 256,
+    "val_crop_size": 0,
+    "epochs": 20,
+    "max_minutes": 0.0,
+    "batch_size": 4,
+    "microbatch_size": 1,
+    "patches_per_image": 1,
+    "samples_per_epoch": 220,
+    "num_workers": 2,
+    "learning_rate": 0.0002,
+    "backbone_lr_scale": 1.0,
+    "weight_decay": 0.001,
+    "fft_weight": 0.05,
+    "degradation_weight": 0.0,
+    "content_weight": 0.0,
+    "decorrelation_weight": 0.0,
+    "gate_weight": 0.0,
+    "freeze_backbone_epochs": 0,
+    "skip_gates": false,
+    "pin_memory": false,
+    "save_optimizer": false,
+    "amp": true,
+    "s2b_manifest": "/kaggle/working/s2b_coverage/cv_manifest.json",
+    "s2b_cache_root": "/kaggle/working/s2b_coverage/generated_cache",
+    "s2b_fold": 0,
+    "skip_standard_evaluation": true
+  },
+  "runs": [
+    {
+      "name": "s2b_r0_reconstruction",
+      "model": "baseline",
+      "training_data": "s2b_r0"
+    },
+    {
+      "name": "s2b_r1_coverage",
+      "model": "baseline",
+      "training_data": "s2b_r1"
+    }
+  ]
+}
