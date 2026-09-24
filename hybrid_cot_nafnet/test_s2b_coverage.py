@@ -18,6 +18,7 @@ from .datasets.s2b_coverage import (
     write_new_manifest,
 )
 from .prepare_s2b_coverage import materialize, validate_cache
+from .run_ablation import read_config, select_runs, training_command
 
 
 class S2BCoverageTest(unittest.TestCase):
@@ -97,6 +98,41 @@ class S2BCoverageTest(unittest.TestCase):
     def test_wrong_development_count_is_rejected(self):
         with self.assertRaises(RuntimeError):
             build_cv_manifest(self.root / "cdd-11-30", development_count=25, fold_count=5)
+
+
+class S2BDistributedConfigTest(unittest.TestCase):
+    def test_locked_configs_are_compatible_with_two_gpus(self):
+        repository = Path(__file__).resolve().parents[1]
+        for filename in (
+            "s2b_coverage_null_cv5_smoke_v2.json",
+            "s2b_coverage_null_cv5_v2.json",
+        ):
+            with self.subTest(config=filename):
+                config = read_config(repository / "configs" / filename)
+                for run in select_runs(config, []):
+                    command = training_command(
+                        run,
+                        Path("/attached/cdd-11-30"),
+                        Path("/working/experiment"),
+                        nproc=2,
+                    )
+                    microbatch_index = command.index("--microbatch-size") + 1
+                    self.assertEqual(command[microbatch_index], "2")
+
+    def test_invalid_two_gpu_microbatch_is_rejected_before_launch(self):
+        repository = Path(__file__).resolve().parents[1]
+        config = read_config(
+            repository / "configs" / "s2b_coverage_null_cv5_smoke_v2.json"
+        )
+        run = select_runs(config, ["s2b_r0_smoke"])[0]
+        run["microbatch_size"] = 1
+        with self.assertRaisesRegex(ValueError, "microbatch_size=1"):
+            training_command(
+                run,
+                Path("/attached/cdd-11-30"),
+                Path("/working/experiment"),
+                nproc=2,
+            )
 
 
 if __name__ == "__main__":

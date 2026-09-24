@@ -112,6 +112,19 @@ def training_command(
         raise ValueError(f"Run {run.get('name')!r} is missing settings: {missing}")
     if nproc < 1:
         raise ValueError("nproc-per-node must be positive")
+    for key in ("batch_size", "microbatch_size"):
+        value = int(run[key])
+        if value < 1 or value % nproc:
+            raise ValueError(
+                f"Run {run.get('name')!r}: {key}={value} must be positive and "
+                f"divisible by nproc-per-node={nproc}"
+            )
+    sample_count = int(run.get("samples_per_epoch", 0))
+    if sample_count > 0 and sample_count % nproc:
+        raise ValueError(
+            f"Run {run.get('name')!r}: samples_per_epoch={sample_count} must be "
+            f"divisible by nproc-per-node={nproc}"
+        )
     command = [
         sys.executable,
         "-m",
