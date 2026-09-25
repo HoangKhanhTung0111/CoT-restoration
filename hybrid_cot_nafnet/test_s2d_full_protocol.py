@@ -18,7 +18,7 @@ class S2DFullProtocolAuditTest(unittest.TestCase):
     def test_locked_protocol_is_valid_and_ready_only_for_f2_cpu(self):
         result = audit(self.config)
         self.assertEqual(result["status"], "VALID")
-        self.assertEqual(result["decision"], "READY_FOR_F2_CPU_CALIBRATION")
+        self.assertEqual(result["decision"], "READY_FOR_F2_FULL_CPU_CALIBRATION")
         self.assertEqual(result["counts"]["frozen_systems"], 5)
         self.assertEqual(result["counts"]["development_forwards"], 12000)
         self.assertEqual(result["counts"]["final_forwards"], 24000)

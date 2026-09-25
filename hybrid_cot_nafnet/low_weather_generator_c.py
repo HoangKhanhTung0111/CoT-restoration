@@ -46,6 +46,7 @@ class ParametersC:
     rain_slant_max: float = 12.0
     rain_blur: int = 3
     rain_brightness: float = 0.90
+    rain_type: str = "default"
     snow_brightness: float = 1.8
     snow_point_min: float = 0.05
     snow_point_max: float = 0.15
@@ -65,6 +66,8 @@ class RealizationC:
     rain_haze_replay: dict[str, Any]
     snow_haze_replay: dict[str, Any]
     replay_sha256: dict[str, str]
+    parameters: ParametersC
+    seed_variant: int
 
 
 def _require_upstream() -> None:
@@ -91,8 +94,11 @@ def _validate_clean(clean_rgb_u8: np.ndarray) -> None:
         raise ValueError("clean_rgb_u8 must be a non-empty HxWx3 uint8 array")
 
 
-def stable_seed(scene_id: str, stream: str) -> int:
-    payload = f"{GENERATOR_VERSION}:{scene_id}:{stream}".encode("utf-8")
+def stable_seed(scene_id: str, stream: str, seed_variant: int = 0) -> int:
+    if seed_variant < 0:
+        raise ValueError("seed_variant must be nonnegative")
+    suffix = "" if seed_variant == 0 else f":candidate-{seed_variant}"
+    payload = f"{GENERATOR_VERSION}:{scene_id}:{stream}{suffix}".encode("utf-8")
     return int.from_bytes(hashlib.sha256(payload).digest()[:4], "little")
 
 
@@ -122,9 +128,9 @@ def _replay_hash(replay: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _weather_transform(weather: str):
+def _weather_transform(weather: str, parameters: ParametersC = DEFAULT_PARAMETERS):
     _require_upstream()
-    p = DEFAULT_PARAMETERS
+    p = parameters
     fog = A.RandomFog(
         alpha_coef=p.fog_alpha,
         fog_coef_range=(p.fog_min, p.fog_max),
@@ -138,7 +144,7 @@ def _weather_transform(weather: str):
             drop_color=(210, 210, 210),
             blur_value=p.rain_blur,
             brightness_coefficient=p.rain_brightness,
-            rain_type="default",
+            rain_type=p.rain_type,
             p=1.0,
         )
     elif weather == "snow_haze":
@@ -153,22 +159,37 @@ def _weather_transform(weather: str):
     return A.ReplayCompose([precipitation, fog], p=1.0)
 
 
-def _sample_weather(clean_rgb_u8: np.ndarray, scene_id: str, weather: str):
-    transform = _weather_transform(weather)
-    seed = stable_seed(scene_id, weather)
+def _sample_weather(
+    clean_rgb_u8: np.ndarray,
+    scene_id: str,
+    weather: str,
+    parameters: ParametersC = DEFAULT_PARAMETERS,
+    seed_variant: int = 0,
+):
+    transform = _weather_transform(weather, parameters)
+    seed = stable_seed(scene_id, weather, seed_variant)
     transform.set_random_seed(seed)
     sampled = transform(image=clean_rgb_u8)
     return sampled["replay"], seed
 
 
-def build_realization(clean_rgb_u8: np.ndarray, scene_id: str) -> RealizationC:
+def build_realization(
+    clean_rgb_u8: np.ndarray,
+    scene_id: str,
+    parameters: ParametersC = DEFAULT_PARAMETERS,
+    seed_variant: int = 0,
+) -> RealizationC:
     """Sample the two weather streams exactly once for a clean scene."""
     _require_upstream()
     _validate_clean(clean_rgb_u8)
     if not scene_id:
         raise ValueError("scene_id must be non-empty")
-    rain_replay, rain_seed = _sample_weather(clean_rgb_u8, scene_id, "rain_haze")
-    snow_replay, snow_seed = _sample_weather(clean_rgb_u8, scene_id, "snow_haze")
+    rain_replay, rain_seed = _sample_weather(
+        clean_rgb_u8, scene_id, "rain_haze", parameters, seed_variant
+    )
+    snow_replay, snow_seed = _sample_weather(
+        clean_rgb_u8, scene_id, "snow_haze", parameters, seed_variant
+    )
     return RealizationC(
         scene_id=scene_id,
         image_shape=tuple(clean_rgb_u8.shape),
@@ -179,6 +200,8 @@ def build_realization(clean_rgb_u8: np.ndarray, scene_id: str) -> RealizationC:
             "rain_haze": _replay_hash(rain_replay),
             "snow_haze": _replay_hash(snow_replay),
         },
+        parameters=parameters,
+        seed_variant=seed_variant,
     )
 
 
@@ -207,12 +230,16 @@ def make_views(
     if tuple(clean_rgb_u8.shape) != realization.image_shape:
         raise ValueError("Clean image shape does not match the sampled realization")
 
-    p = DEFAULT_PARAMETERS
+    p = realization.parameters
     low_weak = _apply_low(
-        clean_rgb_u8, p.weak_gamma, stable_seed(realization.scene_id, "low_weak")
+        clean_rgb_u8,
+        p.weak_gamma,
+        stable_seed(realization.scene_id, "low_weak", realization.seed_variant),
     )
     low_strong = _apply_low(
-        clean_rgb_u8, p.strong_gamma, stable_seed(realization.scene_id, "low_strong")
+        clean_rgb_u8,
+        p.strong_gamma,
+        stable_seed(realization.scene_id, "low_strong", realization.seed_variant),
     )
     rain = realization.rain_haze_replay
     snow = realization.snow_haze_replay
@@ -241,6 +268,7 @@ def realization_metadata(realization: RealizationC) -> dict[str, Any]:
         "seeds": realization.seeds,
         "replay_sha256": realization.replay_sha256,
         "operator_order": ["low", "precipitation", "fog"],
-        "parameters": DEFAULT_PARAMETERS.__dict__,
+        "parameters": realization.parameters.__dict__,
+        "seed_variant": realization.seed_variant,
         "severity_status": "UNCALIBRATED_F1_ONLY",
     }

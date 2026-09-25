@@ -132,11 +132,13 @@ def audit(config: dict) -> dict:
     pre_f2_ready = all(
         feasibility.get(name) in READY_STATUSES for name in pre_f2_gates
     )
-    expected_decision = (
-        "READY_FOR_F2_CPU_CALIBRATION"
-        if pre_f2_ready
-        else "HOLD_BEFORE_DATA_DOWNLOAD_OR_GPU"
-    )
+    calibration = config.get("severity_calibration", {})
+    if pre_f2_ready and calibration.get("runtime_smoke_status") == "PASS_RUNTIME_SMOKE":
+        expected_decision = "READY_FOR_F2_FULL_CPU_CALIBRATION"
+    elif pre_f2_ready:
+        expected_decision = "READY_FOR_F2_CPU_CALIBRATION"
+    else:
+        expected_decision = "HOLD_BEFORE_DATA_DOWNLOAD_OR_GPU"
     if config.get("current_decision") != expected_decision:
         errors.append("decision_does_not_match_gate_state")
 

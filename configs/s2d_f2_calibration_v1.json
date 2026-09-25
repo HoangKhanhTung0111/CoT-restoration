@@ -1,0 +1,45 @@
+{
+  "calibration_version": "s2d-f2-calibration-v1.0",
+  "parent_protocol": "s2d-full-frozen-audit-v1.0",
+  "split": "train",
+  "expected_scene_count": 200,
+  "smoke_scene_count": 5,
+  "cpu_only": true,
+  "restoration_outputs_allowed": false,
+  "final_split_allowed": false,
+  "candidate_selection": {
+    "scope": "one global profile shared by all scenes and all eight conditions",
+    "rule": "minimize lexicographically (failed acceptance checks, mean normalized acceptance ratio, candidate index)",
+    "candidate_count": 8,
+    "use_model_outputs": false
+  },
+  "metrics": {
+    "psnr": "RGB uint8 MSE, peak=255",
+    "ssim": "skimage structural_similarity, RGB channel_axis=2, data_range=255",
+    "lpips": "lpips==0.1.4, net=squeeze, version=0.1, spatial=false, native image resolution",
+    "luminance": "encoded RGB luma 0.2126R+0.7152G+0.0722B in [0,1]",
+    "contrast_ratio": "degraded luma population standard deviation divided by clean luma population standard deviation",
+    "radial_spectrum_distance": "L2 between unit-normalized 32-bin radial profiles of log1p FFT magnitude after 128x128 area resize, mean subtraction and Hann window",
+    "energy_distance": "biased multivariate energy statistic after reference-mean/reference-population-std standardization over all six features"
+  },
+  "acceptance_tolerances": {
+    "absolute_median_input_psnr_db": 0.5,
+    "absolute_median_input_ssim": 0.02,
+    "absolute_median_input_lpips": 0.03,
+    "standardized_energy_distance": 0.25
+  },
+  "runtime_gate": {
+    "maximum_projected_full_seconds": 5400,
+    "failure_action": "Do not launch the 200-scene run; optimize without changing metrics or use an explicit protocol amendment."
+  },
+  "candidate_profiles": [
+    {"id": 0, "weak_gamma": 115.0, "strong_gamma": 160.0, "rain_blur": 3, "rain_brightness": 0.97, "rain_type": "drizzle", "snow_brightness": 1.3, "snow_point_min": 0.02, "snow_point_max": 0.07, "fog_alpha": 0.04, "fog_min": 0.08, "fog_max": 0.18},
+    {"id": 1, "weak_gamma": 125.0, "strong_gamma": 175.0, "rain_blur": 3, "rain_brightness": 0.94, "rain_type": "drizzle", "snow_brightness": 1.4, "snow_point_min": 0.03, "snow_point_max": 0.09, "fog_alpha": 0.05, "fog_min": 0.12, "fog_max": 0.24},
+    {"id": 2, "weak_gamma": 135.0, "strong_gamma": 190.0, "rain_blur": 3, "rain_brightness": 0.92, "rain_type": "default", "snow_brightness": 1.5, "snow_point_min": 0.04, "snow_point_max": 0.11, "fog_alpha": 0.05, "fog_min": 0.16, "fog_max": 0.30},
+    {"id": 3, "weak_gamma": 145.0, "strong_gamma": 210.0, "rain_blur": 3, "rain_brightness": 0.89, "rain_type": "default", "snow_brightness": 1.7, "snow_point_min": 0.05, "snow_point_max": 0.14, "fog_alpha": 0.06, "fog_min": 0.20, "fog_max": 0.38},
+    {"id": 4, "weak_gamma": 155.0, "strong_gamma": 230.0, "rain_blur": 5, "rain_brightness": 0.86, "rain_type": "default", "snow_brightness": 1.9, "snow_point_min": 0.07, "snow_point_max": 0.17, "fog_alpha": 0.06, "fog_min": 0.25, "fog_max": 0.45},
+    {"id": 5, "weak_gamma": 170.0, "strong_gamma": 255.0, "rain_blur": 5, "rain_brightness": 0.82, "rain_type": "heavy", "snow_brightness": 2.1, "snow_point_min": 0.09, "snow_point_max": 0.21, "fog_alpha": 0.07, "fog_min": 0.30, "fog_max": 0.52},
+    {"id": 6, "weak_gamma": 190.0, "strong_gamma": 285.0, "rain_blur": 5, "rain_brightness": 0.78, "rain_type": "heavy", "snow_brightness": 2.3, "snow_point_min": 0.12, "snow_point_max": 0.26, "fog_alpha": 0.08, "fog_min": 0.36, "fog_max": 0.62},
+    {"id": 7, "weak_gamma": 215.0, "strong_gamma": 320.0, "rain_blur": 7, "rain_brightness": 0.72, "rain_type": "torrential", "snow_brightness": 2.5, "snow_point_min": 0.15, "snow_point_max": 0.32, "fog_alpha": 0.09, "fog_min": 0.45, "fog_max": 0.75}
+  ]
+}

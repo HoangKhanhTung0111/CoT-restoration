@@ -3,3 +3,8 @@ albumentations==2.0.8
 albucore==0.0.24
 numpy==2.2.6
 opencv-python-headless==5.0.0.93
+# F2 input-only severity metrics (CPU).
+lpips==0.1.4
+scikit-image==0.26.0
+torch==2.6.0
+torchvision==0.21.0

@@ -84,7 +84,7 @@
       "role": "mechanism_holdout",
       "f1_smoke_status": "PASS",
       "f1_smoke_artifact": "results/2026-09-25_s2d_probe/s2d_renderer_c_f1_smoke.json",
-      "f1_smoke_sha256": "075a650d0fcd8b4656f7132c173e63ef20ae36e214630a62adcc14eb2246eb80"
+      "f1_smoke_sha256": "e2927bbf08e7cbb2307519f7dc74a71a620970ba103b6aebb676f77c7da8b361"
     }
   ],
   "optional_mechanism": {
@@ -101,6 +101,13 @@
     "inclusion_condition": "Written license clarification plus a 10-scene structure-preservation and runtime smoke."
   },
   "severity_calibration": {
+    "f2_config": "configs/s2d_f2_calibration_v1.json",
+    "f2_config_sha256": "9e8c7e6d93287381ca3497af2e6e8310e15e135b90168790a2c0663e7c30a4ae",
+    "runtime_smoke_status": "PASS_RUNTIME_SMOKE",
+    "runtime_smoke_artifact": "results/2026-09-25_s2d_probe/s2d_f2_runtime_smoke.json",
+    "runtime_smoke_sha256": "d03e8d80e767c7b3add6212f1b0eed521781d8aa05089577d5f6948464e0f140",
+    "runtime_smoke_scenes": 5,
+    "projected_full_seconds": 2669.6917000000008,
     "uses_restoration_outputs": false,
     "calibration_split_only": true,
     "candidate_seed_count_per_scene_condition": 8,
@@ -238,10 +245,10 @@
     "controlled_manifest_materialized": "PASS",
     "three_independent_mechanisms": "PASS",
     "five_frozen_systems": "PASS_METADATA_ONLY",
-    "severity_matching": "PENDING_SMOKE",
+    "severity_matching": "PENDING_FULL_RUN",
     "storage_compute_budget": "PENDING_MEASURED_SMOKE",
     "real_endpoint_license": "BLOCKED_PERMISSION",
     "novelty_search": "PASS_WITH_MONITORING"
   },
-  "current_decision": "READY_FOR_F2_CPU_CALIBRATION"
+  "current_decision": "READY_FOR_F2_FULL_CPU_CALIBRATION"
 }
