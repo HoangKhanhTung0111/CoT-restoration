@@ -1,0 +1,58 @@
+{
+  "calibration_version": "s2d-f2-calibration-v2.0",
+  "amends": "s2d-f2-calibration-v1.0",
+  "amendment_reason": "V1 coupled precipitation texture with global attenuation/fog and required a single C distribution to reproduce a bimodal pooled A/B distribution. V2 independently calibrates low, rain and snow factors and uses a preregistered common-support gate.",
+  "split": "train",
+  "expected_scene_count": 200,
+  "smoke_scene_count": 5,
+  "cpu_only": true,
+  "restoration_outputs_allowed": false,
+  "final_split_allowed": false,
+  "selection_scope": {
+    "low": ["low_weak", "low_strong"],
+    "rain": ["rain_haze"],
+    "snow": ["snow_haze"]
+  },
+  "selection_rule": "Choose one global profile per factor by lexicographically minimizing (failed common-support checks, mean normalized gate ratio, profile id). Rebuild the full factorial grid from the three selected profiles and require all eight final conditions to pass.",
+  "common_support_gate": {
+    "median_rule": "For PSNR, SSIM and LPIPS, C median must lie inside the interval between A and B medians expanded by the original absolute tolerance.",
+    "energy_rule": "C-to-pooled-A/B standardized energy must not exceed max(A-to-pooled, B-to-pooled) plus 0.25.",
+    "absolute_median_input_psnr_db": 0.5,
+    "absolute_median_input_ssim": 0.02,
+    "absolute_median_input_lpips": 0.03,
+    "energy_margin": 0.25
+  },
+  "runtime_gate": {
+    "maximum_projected_full_seconds": 5400
+  },
+  "low_profiles": [
+    {"id": 0, "weak_gamma": 185.0, "strong_gamma": 285.0, "weak_noise_std": 0.000, "strong_noise_std": 0.000},
+    {"id": 1, "weak_gamma": 180.0, "strong_gamma": 275.0, "weak_noise_std": 0.010, "strong_noise_std": 0.015},
+    {"id": 2, "weak_gamma": 175.0, "strong_gamma": 265.0, "weak_noise_std": 0.020, "strong_noise_std": 0.025},
+    {"id": 3, "weak_gamma": 170.0, "strong_gamma": 255.0, "weak_noise_std": 0.030, "strong_noise_std": 0.035},
+    {"id": 4, "weak_gamma": 165.0, "strong_gamma": 245.0, "weak_noise_std": 0.040, "strong_noise_std": 0.045},
+    {"id": 5, "weak_gamma": 160.0, "strong_gamma": 235.0, "weak_noise_std": 0.050, "strong_noise_std": 0.055},
+    {"id": 6, "weak_gamma": 155.0, "strong_gamma": 225.0, "weak_noise_std": 0.060, "strong_noise_std": 0.065},
+    {"id": 7, "weak_gamma": 150.0, "strong_gamma": 215.0, "weak_noise_std": 0.070, "strong_noise_std": 0.075}
+  ],
+  "rain_profiles": [
+    {"id": 0, "rain_type": "drizzle", "rain_drop_length": 2, "rain_drop_color": [64, 64, 64], "rain_blur": 11, "rain_brightness": 0.78, "rain_fog_alpha": 0.035, "rain_fog_min": 0.05, "rain_fog_max": 0.12},
+    {"id": 1, "rain_type": "drizzle", "rain_drop_length": 3, "rain_drop_color": [72, 72, 72], "rain_blur": 11, "rain_brightness": 0.74, "rain_fog_alpha": 0.040, "rain_fog_min": 0.07, "rain_fog_max": 0.14},
+    {"id": 2, "rain_type": "drizzle", "rain_drop_length": 4, "rain_drop_color": [80, 80, 80], "rain_blur": 9, "rain_brightness": 0.70, "rain_fog_alpha": 0.045, "rain_fog_min": 0.09, "rain_fog_max": 0.17},
+    {"id": 3, "rain_type": "drizzle", "rain_drop_length": 5, "rain_drop_color": [88, 88, 88], "rain_blur": 9, "rain_brightness": 0.66, "rain_fog_alpha": 0.050, "rain_fog_min": 0.11, "rain_fog_max": 0.20},
+    {"id": 4, "rain_type": "drizzle", "rain_drop_length": 6, "rain_drop_color": [96, 96, 96], "rain_blur": 7, "rain_brightness": 0.62, "rain_fog_alpha": 0.055, "rain_fog_min": 0.13, "rain_fog_max": 0.23},
+    {"id": 5, "rain_type": "drizzle", "rain_drop_length": 8, "rain_drop_color": [104, 104, 104], "rain_blur": 7, "rain_brightness": 0.58, "rain_fog_alpha": 0.060, "rain_fog_min": 0.15, "rain_fog_max": 0.27},
+    {"id": 6, "rain_type": "drizzle", "rain_drop_length": 10, "rain_drop_color": [112, 112, 112], "rain_blur": 7, "rain_brightness": 0.54, "rain_fog_alpha": 0.065, "rain_fog_min": 0.18, "rain_fog_max": 0.32},
+    {"id": 7, "rain_type": "drizzle", "rain_drop_length": 12, "rain_drop_color": [128, 128, 128], "rain_blur": 5, "rain_brightness": 0.50, "rain_fog_alpha": 0.070, "rain_fog_min": 0.22, "rain_fog_max": 0.38}
+  ],
+  "snow_profiles": [
+    {"id": 0, "snow_method": "bleach", "snow_brightness": 1.10, "snow_point_min": 0.02, "snow_point_max": 0.04, "snow_fog_alpha": 0.035, "snow_fog_min": 0.08, "snow_fog_max": 0.15},
+    {"id": 1, "snow_method": "bleach", "snow_brightness": 1.20, "snow_point_min": 0.03, "snow_point_max": 0.06, "snow_fog_alpha": 0.040, "snow_fog_min": 0.10, "snow_fog_max": 0.18},
+    {"id": 2, "snow_method": "bleach", "snow_brightness": 1.30, "snow_point_min": 0.04, "snow_point_max": 0.08, "snow_fog_alpha": 0.045, "snow_fog_min": 0.12, "snow_fog_max": 0.21},
+    {"id": 3, "snow_method": "bleach", "snow_brightness": 1.40, "snow_point_min": 0.05, "snow_point_max": 0.10, "snow_fog_alpha": 0.050, "snow_fog_min": 0.14, "snow_fog_max": 0.24},
+    {"id": 4, "snow_method": "bleach", "snow_brightness": 1.50, "snow_point_min": 0.07, "snow_point_max": 0.13, "snow_fog_alpha": 0.055, "snow_fog_min": 0.16, "snow_fog_max": 0.28},
+    {"id": 5, "snow_method": "bleach", "snow_brightness": 1.65, "snow_point_min": 0.09, "snow_point_max": 0.16, "snow_fog_alpha": 0.060, "snow_fog_min": 0.19, "snow_fog_max": 0.32},
+    {"id": 6, "snow_method": "bleach", "snow_brightness": 1.80, "snow_point_min": 0.12, "snow_point_max": 0.20, "snow_fog_alpha": 0.065, "snow_fog_min": 0.22, "snow_fog_max": 0.37},
+    {"id": 7, "snow_method": "bleach", "snow_brightness": 2.00, "snow_point_min": 0.16, "snow_point_max": 0.26, "snow_fog_alpha": 0.070, "snow_fog_min": 0.27, "snow_fog_max": 0.44}
+  ]
+}

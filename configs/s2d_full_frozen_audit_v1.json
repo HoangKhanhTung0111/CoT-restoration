@@ -1,7 +1,7 @@
 {
   "protocol_version": "s2d-full-frozen-audit-v1.0",
   "locked_at": "2026-09-25",
-  "status": "F2_SEVERITY_MATCHING_FAILED_STOP_BEFORE_F3",
+  "status": "F2_V2_AMENDMENT_LOCKED_READY_FOR_ONE_FULL_CPU_RUN",
   "scientific_scope": {
     "question": "Do restoration conclusions and model rankings change when clean content, semantic degradation factors, severity stratum and evaluation code are held fixed but the degradation renderer changes?",
     "restoration_training_allowed": false,
@@ -84,7 +84,7 @@
       "role": "mechanism_holdout",
       "f1_smoke_status": "PASS",
       "f1_smoke_artifact": "results/2026-09-25_s2d_probe/s2d_renderer_c_f1_smoke.json",
-      "f1_smoke_sha256": "e2927bbf08e7cbb2307519f7dc74a71a620970ba103b6aebb676f77c7da8b361"
+      "f1_smoke_sha256": "1b3abc02887ad0369a1b0cad2c9f18f9969b66fd50ff90c171706645853eb48c"
     }
   ],
   "optional_mechanism": {
@@ -118,6 +118,13 @@
     "selected_conditions_passed": 0,
     "result_audit": "results/2026-09-25_s2d_probe/s2d_f2_result_audit.json",
     "result_audit_sha256": "8c6c1196af1fdc30fc510e5b830710f40c54e8f856ac822faecad81b9e30cdce",
+    "v2_amendment": "configs/s2d_f2_calibration_v2.json",
+    "v2_amendment_sha256": "b58cd53299acdb8406e7c7140720a815a783fac2476d909ea8250cc41aab54ce",
+    "v2_amendment_limit": "ONE_FULL_RUN_ONLY",
+    "v2_runtime_smoke_status": "PASS_RUNTIME_SMOKE",
+    "v2_runtime_smoke_artifact": "results/2026-09-25_s2d_probe/s2d_f2_v2_runtime_smoke.json",
+    "v2_runtime_smoke_sha256": "8148e943ab4ec1ee09de1f55ec858d57a101743faf4c1556d0b599a9a18c8399",
+    "v2_projected_full_seconds": 2255.6700360000104,
     "uses_restoration_outputs": false,
     "calibration_split_only": true,
     "candidate_seed_count_per_scene_condition": 8,
@@ -255,10 +262,10 @@
     "controlled_manifest_materialized": "PASS",
     "three_independent_mechanisms": "PASS",
     "five_frozen_systems": "PASS_METADATA_ONLY",
-    "severity_matching": "FAIL",
+    "severity_matching": "F2_V2_PENDING_FULL",
     "storage_compute_budget": "PENDING_MEASURED_SMOKE",
     "real_endpoint_license": "BLOCKED_PERMISSION",
     "novelty_search": "PASS_WITH_MONITORING"
   },
-  "current_decision": "STOP_F2_REVISE_OR_REJECT_RENDERER_C"
+  "current_decision": "READY_FOR_F2_V2_FULL_CPU_CALIBRATION"
 }

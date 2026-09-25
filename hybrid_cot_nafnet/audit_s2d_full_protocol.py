@@ -133,7 +133,9 @@ def audit(config: dict) -> dict:
         feasibility.get(name) in READY_STATUSES for name in pre_f2_gates
     )
     calibration = config.get("severity_calibration", {})
-    if feasibility.get("severity_matching") == "FAIL":
+    if feasibility.get("severity_matching") == "F2_V2_PENDING_FULL":
+        expected_decision = "READY_FOR_F2_V2_FULL_CPU_CALIBRATION"
+    elif feasibility.get("severity_matching") == "FAIL":
         expected_decision = "STOP_F2_REVISE_OR_REJECT_RENDERER_C"
     elif pre_f2_ready and calibration.get("runtime_smoke_status") == "PASS_RUNTIME_SMOKE":
         expected_decision = "READY_FOR_F2_FULL_CPU_CALIBRATION"

@@ -42,17 +42,28 @@ class ParametersC:
 
     weak_gamma: float = 140.0
     strong_gamma: float = 220.0
+    weak_noise_std: float = 0.0
+    strong_noise_std: float = 0.0
     rain_slant_min: float = -12.0
     rain_slant_max: float = 12.0
+    rain_drop_length: int | None = None
+    rain_drop_color: tuple[int, int, int] = (210, 210, 210)
     rain_blur: int = 3
     rain_brightness: float = 0.90
     rain_type: str = "default"
     snow_brightness: float = 1.8
     snow_point_min: float = 0.05
     snow_point_max: float = 0.15
+    snow_method: str = "texture"
     fog_alpha: float = 0.06
     fog_min: float = 0.20
     fog_max: float = 0.40
+    rain_fog_alpha: float | None = None
+    rain_fog_min: float | None = None
+    rain_fog_max: float | None = None
+    snow_fog_alpha: float | None = None
+    snow_fog_min: float | None = None
+    snow_fog_max: float | None = None
 
 
 DEFAULT_PARAMETERS = ParametersC()
@@ -131,31 +142,37 @@ def _replay_hash(replay: dict[str, Any]) -> str:
 def _weather_transform(weather: str, parameters: ParametersC = DEFAULT_PARAMETERS):
     _require_upstream()
     p = parameters
-    fog = A.RandomFog(
-        alpha_coef=p.fog_alpha,
-        fog_coef_range=(p.fog_min, p.fog_max),
-        p=1.0,
-    )
     if weather == "rain_haze":
+        fog_alpha = p.fog_alpha if p.rain_fog_alpha is None else p.rain_fog_alpha
+        fog_min = p.fog_min if p.rain_fog_min is None else p.rain_fog_min
+        fog_max = p.fog_max if p.rain_fog_max is None else p.rain_fog_max
         precipitation = A.RandomRain(
             slant_range=(p.rain_slant_min, p.rain_slant_max),
-            drop_length=None,
+            drop_length=p.rain_drop_length,
             drop_width=1,
-            drop_color=(210, 210, 210),
+            drop_color=tuple(p.rain_drop_color),
             blur_value=p.rain_blur,
             brightness_coefficient=p.rain_brightness,
             rain_type=p.rain_type,
             p=1.0,
         )
     elif weather == "snow_haze":
+        fog_alpha = p.fog_alpha if p.snow_fog_alpha is None else p.snow_fog_alpha
+        fog_min = p.fog_min if p.snow_fog_min is None else p.snow_fog_min
+        fog_max = p.fog_max if p.snow_fog_max is None else p.snow_fog_max
         precipitation = A.RandomSnow(
             brightness_coeff=p.snow_brightness,
             snow_point_range=(p.snow_point_min, p.snow_point_max),
-            method="texture",
+            method=p.snow_method,
             p=1.0,
         )
     else:
         raise ValueError(f"Unknown weather {weather!r}")
+    fog = A.RandomFog(
+        alpha_coef=fog_alpha,
+        fog_coef_range=(fog_min, fog_max),
+        p=1.0,
+    )
     return A.ReplayCompose([precipitation, fog], p=1.0)
 
 
@@ -205,9 +222,25 @@ def build_realization(
     )
 
 
-def _apply_low(clean_rgb_u8: np.ndarray, gamma: float, seed: int) -> np.ndarray:
+def _apply_low(
+    clean_rgb_u8: np.ndarray,
+    gamma: float,
+    seed: int,
+    noise_std: float = 0.0,
+) -> np.ndarray:
+    transforms = [A.RandomGamma(gamma_limit=(gamma, gamma), p=1.0)]
+    if noise_std > 0:
+        transforms.append(
+            A.GaussNoise(
+                std_range=(noise_std, noise_std),
+                mean_range=(0.0, 0.0),
+                per_channel=True,
+                noise_scale_factor=1.0,
+                p=1.0,
+            )
+        )
     transform = A.Compose(
-        [A.RandomGamma(gamma_limit=(gamma, gamma), p=1.0)],
+        transforms,
         p=1.0,
         seed=seed,
         strict=True,
@@ -235,11 +268,13 @@ def make_views(
         clean_rgb_u8,
         p.weak_gamma,
         stable_seed(realization.scene_id, "low_weak", realization.seed_variant),
+        p.weak_noise_std,
     )
     low_strong = _apply_low(
         clean_rgb_u8,
         p.strong_gamma,
         stable_seed(realization.scene_id, "low_strong", realization.seed_variant),
+        p.strong_noise_std,
     )
     rain = realization.rain_haze_replay
     snow = realization.snow_haze_replay
@@ -256,6 +291,58 @@ def make_views(
     if tuple(views) != CONDITIONS:
         raise AssertionError("Mechanism-C condition order changed")
     return views
+
+
+def make_factorized_views(
+    clean_rgb_u8: np.ndarray,
+    scene_id: str,
+    low_parameters: ParametersC,
+    rain_parameters: ParametersC,
+    snow_parameters: ParametersC,
+    *,
+    low_seed_variant: int,
+    rain_seed_variant: int,
+    snow_seed_variant: int,
+) -> dict[str, np.ndarray]:
+    """Build a factorial grid from independently calibrated factor profiles."""
+    _require_upstream()
+    _validate_clean(clean_rgb_u8)
+    low_weak = _apply_low(
+        clean_rgb_u8,
+        low_parameters.weak_gamma,
+        stable_seed(scene_id, "low_weak", low_seed_variant),
+        low_parameters.weak_noise_std,
+    )
+    low_strong = _apply_low(
+        clean_rgb_u8,
+        low_parameters.strong_gamma,
+        stable_seed(scene_id, "low_strong", low_seed_variant),
+        low_parameters.strong_noise_std,
+    )
+    rain, _ = _sample_weather(
+        clean_rgb_u8,
+        scene_id,
+        "rain_haze",
+        rain_parameters,
+        rain_seed_variant,
+    )
+    snow, _ = _sample_weather(
+        clean_rgb_u8,
+        scene_id,
+        "snow_haze",
+        snow_parameters,
+        snow_seed_variant,
+    )
+    return {
+        "low_weak": low_weak,
+        "low_strong": low_strong,
+        "rain_haze": _replay_weather(rain, clean_rgb_u8),
+        "snow_haze": _replay_weather(snow, clean_rgb_u8),
+        "low_weak_rain_haze": _replay_weather(rain, low_weak),
+        "low_strong_rain_haze": _replay_weather(rain, low_strong),
+        "low_weak_snow_haze": _replay_weather(snow, low_weak),
+        "low_strong_snow_haze": _replay_weather(snow, low_strong),
+    }
 
 
 def realization_metadata(realization: RealizationC) -> dict[str, Any]:

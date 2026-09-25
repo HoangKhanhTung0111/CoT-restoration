@@ -97,12 +97,14 @@ def _metric_rows(
     model,
     torch_module,
 ) -> list[dict[str, float | str]]:
-    if tuple(views) != CONDITIONS:
-        raise RuntimeError("Condition order changed")
+    condition_names = tuple(views)
+    expected_subset = tuple(name for name in CONDITIONS if name in views)
+    if not condition_names or condition_names != expected_subset:
+        raise RuntimeError("Condition order changed or unknown condition supplied")
     clean_luma = _luma(clean)
     clean_spectrum = _radial_spectrum(clean_luma)
     clean_contrast = max(float(clean_luma.std()), 1e-12)
-    arrays = [np.ascontiguousarray(views[name]) for name in CONDITIONS]
+    arrays = [np.ascontiguousarray(views[name]) for name in condition_names]
     batch = torch_module.from_numpy(np.stack(arrays)).permute(0, 3, 1, 2)
     target = torch_module.from_numpy(
         np.stack([np.ascontiguousarray(clean)] * len(arrays))
@@ -113,7 +115,7 @@ def _metric_rows(
         lpips_values = model(batch, target).reshape(-1).cpu().numpy()
 
     rows = []
-    for condition, degraded, lpips_value in zip(CONDITIONS, arrays, lpips_values):
+    for condition, degraded, lpips_value in zip(condition_names, arrays, lpips_values):
         difference = degraded.astype(np.float64) - clean.astype(np.float64)
         mse = float(np.mean(difference * difference))
         psnr = 20.0 * math.log10(255.0) - 10.0 * math.log10(max(mse, 1e-12))
