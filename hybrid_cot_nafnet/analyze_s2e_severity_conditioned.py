@@ -232,6 +232,60 @@ def _attach_lpips(
     }
 
 
+def _audit_cache_alignment(s2b_path: Path, raw_path: Path) -> dict:
+    with zipfile.ZipFile(s2b_path) as archive:
+        s2b_manifest = _json_member(archive, "cache_manifest.json")
+    with zipfile.ZipFile(raw_path) as archive:
+        probe_manifest = _json_member(archive, "cache_manifest.json")
+        raw_manifest = _json_member(archive, "probe/s2d_raw_manifest.json")
+
+    def records_by_key(manifest: dict) -> dict[tuple[str, str], tuple[str, str]]:
+        records = manifest.get("records")
+        if not isinstance(records, list):
+            raise RuntimeError("Malformed cache manifest records")
+        result = {
+            (record["scene"], record["type"]): (
+                record["pixel_sha256"],
+                record["file_sha256"],
+            )
+            for record in records
+        }
+        if len(result) != len(records):
+            raise RuntimeError("Duplicate cache manifest record")
+        return result
+
+    s2b = records_by_key(s2b_manifest)
+    probe = records_by_key(probe_manifest)
+    if set(s2b) != set(probe):
+        raise RuntimeError("S2b and S2d cache manifests have different keys")
+    by_generator = {}
+    for generator, prefix in (("A", "a_"), ("B", "b_")):
+        keys = [key for key in sorted(s2b) if key[1].startswith(prefix)]
+        matches = sum(s2b[key] == probe[key] for key in keys)
+        by_generator[generator] = {
+            "records": len(keys),
+            "exact_pixel_and_file_hash_matches": matches,
+            "mismatches": len(keys) - matches,
+        }
+    return {
+        "protocol_matches": s2b_manifest.get("protocol_version")
+        == probe_manifest.get("protocol_version"),
+        "split_manifest_sha256_s2b": s2b_manifest.get("split_manifest_sha256"),
+        "split_manifest_sha256_s2d": probe_manifest.get("split_manifest_sha256"),
+        "split_matches": s2b_manifest.get("split_manifest_sha256")
+        == probe_manifest.get("split_manifest_sha256"),
+        "by_generator": by_generator,
+        "all_records_match": all(
+            value["mismatches"] == 0 for value in by_generator.values()
+        ),
+        "raw_manifest_declared_cache_sha256": raw_manifest.get(
+            "cache_manifest_sha256"
+        ),
+        "raw_cdd11_test_opened": raw_manifest.get("cdd11_test_opened"),
+        "raw_exported": raw_manifest.get("raw_exported"),
+    }
+
+
 def _design_matrices(
     train_rows: list[dict],
     test_rows: list[dict],
@@ -582,6 +636,10 @@ def analyze(config_path: Path) -> dict:
         if actual != expected_hash:
             raise RuntimeError(f"Archive hash mismatch for {path}: {actual}")
 
+    alignment = _audit_cache_alignment(s2b_path, raw_path)
+    if not alignment["protocol_matches"] or not alignment["split_matches"]:
+        raise RuntimeError(f"S2b/S2d protocol or split mismatch: {alignment}")
+
     expected = config["expected"]
     primary_conditions = tuple(config["primary_conditions"])
     rows, s2b_info = _load_s2b_rows(
@@ -589,9 +647,25 @@ def analyze(config_path: Path) -> dict:
     )
     if len(rows) != int(expected["primary_rows"]):
         raise RuntimeError(f"Expected {expected['primary_rows']} primary rows, found {len(rows)}")
-    rows, raw_info = _attach_lpips(rows, raw_path, expected)
-    if s2b_info["cache_manifest_sha256"] != raw_info["cache_manifest_sha256"]:
-        raise RuntimeError("S2b/S2d cache manifest hash mismatch")
+    severity_features = tuple(config["severity"]["features"])
+    if "input_lpips" in severity_features:
+        if not alignment["all_records_match"]:
+            raise RuntimeError(
+                "S2d raw inputs do not exactly match the S2b cache; LPIPS join forbidden"
+            )
+        rows, raw_info = _attach_lpips(rows, raw_path, expected)
+        if s2b_info["cache_manifest_sha256"] != raw_info["cache_manifest_sha256"]:
+            raise RuntimeError("S2b/S2d cache manifest hash mismatch")
+        raw_info["used_for_severity"] = True
+    else:
+        raw_info = {
+            "used_for_severity": False,
+            "cache_alignment": alignment,
+            "safety": {
+                "cdd11_test_opened": alignment["raw_cdd11_test_opened"],
+                "raw_exported": alignment["raw_exported"],
+            },
+        }
     adjusted = cross_fit_rows(rows, config)
     summary = summarize_adjusted_rows(adjusted, config)
     scenes = {row["scene"] for row in adjusted}
@@ -633,10 +707,17 @@ def analyze(config_path: Path) -> dict:
         "elapsed_seconds": time.perf_counter() - started,
         "interpretation_limits": [
             "The raw S2b outcome and generator-specific result were already known; this is exploratory falsification, not confirmation.",
-            "Severity adjustment controls only observed PSNR, SSIM and resized LPIPS, not all image-formation differences.",
+            "Severity adjustment controls only the configured observed input metrics, not all image-formation differences.",
             "R0/R1 are training recipes for one backbone, not five independent restoration systems.",
             "A positive result only permits a separately locked five-model A/B pilot.",
-        ],
+        ]
+        + (
+            []
+            if "input_lpips" in severity_features
+            else [
+                "Exact LPIPS is unavailable because S2d raw B does not match the S2b B cache; v1.1 adjusts PSNR and SSIM only."
+            ]
+        ),
     }
 
 

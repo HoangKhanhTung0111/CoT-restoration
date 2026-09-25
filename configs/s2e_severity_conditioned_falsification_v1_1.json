@@ -1,0 +1,91 @@
+{
+  "protocol_version": "s2e-severity-conditioned-falsification-v1.1",
+  "locked_at": "2026-09-26",
+  "amends": "s2e-severity-conditioned-falsification-v1.0",
+  "amendment_reason": "The pre-result provenance check found that S2d raw A matches the S2b cache but S2d raw B does not. LPIPS from S2d raw B therefore cannot be joined to S2b outcomes. No adjusted result was produced under v1.0.",
+  "analysis_scope": "exploratory_two_metric_falsification_locked_before_adjusted_results",
+  "scientific_question": "Does the out-of-fold R1-minus-R0 recipe gain remain generator-specific after conditioning on the exact input PSNR and SSIM stored with the S2b A/B outcomes?",
+  "sources": {
+    "s2b_archive": "results/2026-09-25_s2b_cv5/s2b_coverage_cv5_full_20260924T030817384937Z.zip",
+    "s2b_archive_sha256": "4b6b1d81b627c5a8be34c54d0aa7e37e6ea082f22f57a3c4fbc64e64cd09bf0e",
+    "s2d_raw_archive": "results/2026-09-25_s2d_probe/s2d_mechanism_probe_20260925T041132995354Z.zip",
+    "s2d_raw_archive_sha256": "effac9b3e919a19d0b892ac0ba08cf375345be935964dc19ed79178eaac2696b",
+    "s2d_raw_usage": "provenance audit only; no S2d raw severity feature may be joined to S2b outcomes"
+  },
+  "expected": {
+    "scenes": 25,
+    "folds": 5,
+    "all_conditions": 8,
+    "raw_inputs": 400,
+    "raw_ground_truth": 25,
+    "s2b_metric_rows": 1350,
+    "primary_rows": 200,
+    "primary_pairs": 100
+  },
+  "primary_conditions": [
+    "low_weak_rain_haze",
+    "low_strong_rain_haze",
+    "low_weak_snow_haze",
+    "low_strong_snow_haze"
+  ],
+  "families": {
+    "rain": ["low_weak_rain_haze", "low_strong_rain_haze"],
+    "snow": ["low_weak_snow_haze", "low_strong_snow_haze"]
+  },
+  "severity": {
+    "features": ["input_psnr", "input_ssim"],
+    "source": "immutable S2b OOF evaluation rows; R0 and R1 must match exactly",
+    "input_lpips_status": "unavailable_for_exact_s2b_inputs",
+    "restoration_outputs_forbidden": true
+  },
+  "outcome": {
+    "name": "oof_recipe_gain_psnr",
+    "definition": "PSNR(R1 coverage) minus PSNR(R0 reconstruction) for the same fold, scene, condition and generator",
+    "decision_threshold_db": 0.2
+  },
+  "estimators": {
+    "primary": "five-fold cross-fitted ridge residualization, paired by scene and condition",
+    "ridge_alpha": 1.0,
+    "design": "condition one-hot plus condition-specific standardized PSNR and SSIM slopes; no generator feature",
+    "overlap_sensitivity": "five-fold cross-fitted L2 logistic propensity and overlap weights",
+    "logistic_c": 1.0,
+    "bootstrap_seed": 20260925,
+    "bootstrap_replicates": 10000,
+    "sign_flip_seed": 20260926,
+    "sign_flip_replicates": 100000,
+    "resampling_unit": "clean scene"
+  },
+  "overlap_gate": {
+    "propensity_interval": [0.1, 0.9],
+    "minimum_fraction_in_interval_per_generator": 0.6,
+    "minimum_effective_sample_size_per_generator": 50.0,
+    "maximum_absolute_weighted_smd_overall": 0.25,
+    "maximum_absolute_weighted_smd_per_weather_family": 0.35
+  },
+  "effect_gate": {
+    "minimum_primary_adjusted_interaction_db": 0.5,
+    "primary_bootstrap_lower_must_exceed_zero": true,
+    "primary_sign_flip_p_max": 0.05,
+    "overlap_weighted_interaction_must_be_at_least_db": 0.5,
+    "overlap_weighted_bootstrap_lower_must_exceed_zero": true,
+    "minimum_family_point_estimate_db": 0.25,
+    "minimum_positive_condition_count": 3,
+    "minimum_raw_decision_reversal_rate": 0.1
+  },
+  "decisions": {
+    "overlap_failure": "STOP_SDDR_NO_PSNR_SSIM_COMMON_SUPPORT",
+    "effect_failure": "STOP_SDDR_PSNR_SSIM_CONDITIONED_EVIDENCE_INSUFFICIENT",
+    "pass": "PROVISIONAL_GO_NEW_SELF_CONSISTENT_FIVE_MODEL_AB_PILOT"
+  },
+  "safety": {
+    "cpu_only": true,
+    "restoration_inference_allowed": false,
+    "training_allowed": false,
+    "checkpoint_loading_allowed": false,
+    "network_download_allowed": false,
+    "sealed_partition_access_allowed": false,
+    "renderer_retuning_allowed": false,
+    "gate_retuning_after_result_allowed": false
+  },
+  "interpretation_limit": "A positive v1.1 result does not establish three-metric common support because exact LPIPS is unavailable. It only justifies a newly locked pilot whose raw inputs, severity metrics and outputs are archived together."
+}
