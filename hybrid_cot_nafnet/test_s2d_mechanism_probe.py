@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
+from PIL import Image
 
+from .datasets.cdd11 import CDD11_TYPES
+from .datasets.s2b_coverage import build_cv_manifest, write_new_manifest
+from .prepare_s2b_coverage import materialize
 from .s2d_mechanism_probe import (
     extract_feature_families,
     extract_residual_feature_families,
     grouped_probe,
     pair_moment_match,
+    run_probe,
 )
 from .summarize_s2d_pilot import evaluate_gate
 
@@ -66,6 +74,41 @@ class S2DMechanismProbeTest(unittest.TestCase):
         )
         self.assertEqual(result["balanced_accuracy"], 1.0)
         self.assertEqual(len(result["folds"]), 5)
+
+    def test_end_to_end_fixture_never_needs_test_partition_or_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_root = root / "cdd-11-30"
+            train = data_root / "CDD-11_train"
+            for name in ("clear", *CDD11_TYPES):
+                (train / name).mkdir(parents=True)
+            rng = np.random.default_rng(11)
+            for index in range(25):
+                filename = f"{index:06d}.png"
+                clean = rng.integers(0, 256, size=(32, 48, 3), dtype=np.uint8)
+                Image.fromarray(clean).save(train / "clear" / filename)
+                for type_index, name in enumerate(CDD11_TYPES):
+                    degraded = np.clip(
+                        clean.astype(np.int16) - type_index - 1, 0, 255
+                    ).astype(np.uint8)
+                    Image.fromarray(degraded).save(train / name / filename)
+            manifest_path = root / "cv_manifest.json"
+            manifest = build_cv_manifest(data_root)
+            write_new_manifest(manifest_path, manifest)
+            cache = root / "cache"
+            materialize(data_root, manifest_path, cache)
+            output = root / "probe"
+            with patch("hybrid_cot_nafnet.s2d_mechanism_probe.PERMUTATIONS", 3):
+                result = run_probe(
+                    data_root, manifest_path, cache, output, export_raw=False
+                )
+            self.assertEqual(result["status"], "COMPLETE")
+            self.assertEqual(result["sample_count"], 400)
+            self.assertEqual(result["audit"]["a_b_pair_count"], 200)
+            self.assertFalse(result["audit"]["cdd11_test_opened"])
+            self.assertFalse(result["audit"]["restoration_checkpoint_loaded"])
+            self.assertFalse(result["audit"]["restoration_training_performed"])
+            self.assertFalse((data_root / "CDD-11_test").exists())
 
     def test_decision_gate_requires_all_controls(self):
         probe = {
