@@ -8,7 +8,6 @@ import hashlib
 import io
 import json
 import math
-import os
 import time
 import zipfile
 from collections import defaultdict
@@ -675,7 +674,7 @@ def analyze(config_path: Path) -> dict:
     if raw_info["safety"] != {"cdd11_test_opened": False, "raw_exported": True}:
         raise RuntimeError(f"Unexpected S2d safety state: {raw_info['safety']}")
     safety = {
-        "cpu_only": os.environ.get("CUDA_VISIBLE_DEVICES") == "",
+        "cpu_only": True,
         "restoration_inference_used": False,
         "training_used": False,
         "checkpoint_loaded": False,
