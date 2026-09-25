@@ -1,7 +1,7 @@
 {
   "protocol_version": "s2d-full-frozen-audit-v1.0",
   "locked_at": "2026-09-25",
-  "status": "F1_AND_CONTROLLED_MANIFEST_PASS_PENDING_F2_F3_AND_PERMISSION",
+  "status": "F2_SEVERITY_MATCHING_FAILED_STOP_BEFORE_F3",
   "scientific_scope": {
     "question": "Do restoration conclusions and model rankings change when clean content, semantic degradation factors, severity stratum and evaluation code are held fixed but the degradation renderer changes?",
     "restoration_training_allowed": false,
@@ -108,6 +108,16 @@
     "runtime_smoke_sha256": "d03e8d80e767c7b3add6212f1b0eed521781d8aa05089577d5f6948464e0f140",
     "runtime_smoke_scenes": 5,
     "projected_full_seconds": 2669.6917000000008,
+    "full_run_status": "FAIL_SEVERITY_MATCHING",
+    "full_run_artifact": "results/2026-09-25_s2d_probe/s2d_f2_calibration_full.json",
+    "full_run_sha256": "626daffd8ba8060632cd931e0c7c95828fd6bf71e585b3743ebc3509160b472b",
+    "full_run_elapsed_seconds": 4091.1361692,
+    "full_run_metric_rows": 16000,
+    "selected_candidate_id": 5,
+    "selected_failed_checks": 26,
+    "selected_conditions_passed": 0,
+    "result_audit": "results/2026-09-25_s2d_probe/s2d_f2_result_audit.json",
+    "result_audit_sha256": "8c6c1196af1fdc30fc510e5b830710f40c54e8f856ac822faecad81b9e30cdce",
     "uses_restoration_outputs": false,
     "calibration_split_only": true,
     "candidate_seed_count_per_scene_condition": 8,
@@ -245,10 +255,10 @@
     "controlled_manifest_materialized": "PASS",
     "three_independent_mechanisms": "PASS",
     "five_frozen_systems": "PASS_METADATA_ONLY",
-    "severity_matching": "PENDING_FULL_RUN",
+    "severity_matching": "FAIL",
     "storage_compute_budget": "PENDING_MEASURED_SMOKE",
     "real_endpoint_license": "BLOCKED_PERMISSION",
     "novelty_search": "PASS_WITH_MONITORING"
   },
-  "current_decision": "READY_FOR_F2_FULL_CPU_CALIBRATION"
+  "current_decision": "STOP_F2_REVISE_OR_REJECT_RENDERER_C"
 }
