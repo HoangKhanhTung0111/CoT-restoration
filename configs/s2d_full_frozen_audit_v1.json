@@ -1,0 +1,247 @@
+{
+  "protocol_version": "s2d-full-frozen-audit-v1.0",
+  "locked_at": "2026-09-25",
+  "status": "F1_AND_CONTROLLED_MANIFEST_PASS_PENDING_F2_F3_AND_PERMISSION",
+  "scientific_scope": {
+    "question": "Do restoration conclusions and model rankings change when clean content, semantic degradation factors, severity stratum and evaluation code are held fixed but the degradation renderer changes?",
+    "restoration_training_allowed": false,
+    "test_time_adaptation_allowed": false,
+    "sealed_partition_access_allowed": false,
+    "large_dataset_download_allowed": false,
+    "candidate_method_versions_consumed": 0
+  },
+  "controlled_corpus": {
+    "name": "BSDS500",
+    "official_url": "https://www2.eecs.berkeley.edu/Research/Projects/CS/vision/grouping/resources.html",
+    "download_url": "https://www2.eecs.berkeley.edu/Research/Projects/CS/vision/grouping/BSR/BSR_bsds500.tgz",
+    "license_summary": "Non-commercial research and educational use; redistribute only manifests, hashes and generation code.",
+    "archive_bytes": 74332160,
+    "archive_sha256": "3a5389cbe5267104855491ad9bad1ba77c5c9d081ab34d9a4211a19cef3c9c5d",
+    "scene_count": 500,
+    "splits": {
+      "severity_calibration": 200,
+      "development": 100,
+      "final_once": 200
+    },
+    "preserve_official_split": true,
+    "materialized_and_hashed": true,
+    "manifest": "results/2026-09-25_s2d_probe/bsds500_manifest_v1.json",
+    "manifest_sha256": "29e2d8940142b92df2a1f3c32e87b568c69cd250d5bf67646c33c42f02f6887b",
+    "image_pixels_decoded_during_manifest": false,
+    "final_split_pixels_decoded": false
+  },
+  "conditions": [
+    "low_weak",
+    "low_strong",
+    "rain_haze",
+    "snow_haze",
+    "low_weak_rain_haze",
+    "low_strong_rain_haze",
+    "low_weak_snow_haze",
+    "low_strong_snow_haze"
+  ],
+  "canonical_order": [
+    "low",
+    "precipitation",
+    "haze"
+  ],
+  "mechanisms": [
+    {
+      "id": "A",
+      "name": "legacy_factorial_renderer",
+      "implementation": "hybrid_cot_nafnet.audit_low_weather_replication.unique_scene_views",
+      "family": "screen_space_layer_compositor",
+      "external_assets": false,
+      "deterministic_seed_required": true,
+      "role": "historical_anchor"
+    },
+    {
+      "id": "B",
+      "name": "linear_rgb_sensor_atmosphere_renderer",
+      "implementation": "hybrid_cot_nafnet.low_weather_generator_b",
+      "family": "linear_rgb_sensor_noise_and_atmospheric_scattering",
+      "external_assets": false,
+      "deterministic_seed_required": true,
+      "role": "development_anchor"
+    },
+    {
+      "id": "C",
+      "name": "albumentations_weather_renderer",
+      "upstream": "https://github.com/albumentations-team/albumentations",
+      "revision": "4d2cf04b6635663275a747333754410ef255e54c",
+      "package_version": "2.0.8",
+      "implementation": "hybrid_cot_nafnet.low_weather_generator_c",
+      "requirements": "requirements_s2d_full_audit.txt",
+      "license": "MIT",
+      "family": "independent_public_augmentation_library",
+      "operators": [
+        "RandomRain",
+        "RandomSnow",
+        "RandomFog",
+        "RandomGamma_or_RandomBrightnessContrast"
+      ],
+      "deterministic_seed_required": true,
+      "role": "mechanism_holdout",
+      "f1_smoke_status": "PASS",
+      "f1_smoke_artifact": "results/2026-09-25_s2d_probe/s2d_renderer_c_f1_smoke.json",
+      "f1_smoke_sha256": "075a650d0fcd8b4656f7132c173e63ef20ae36e214630a62adcc14eb2246eb80"
+    }
+  ],
+  "optional_mechanism": {
+    "id": "D",
+    "name": "GenDeg",
+    "upstream": "https://github.com/sudraj2002/GenDeg",
+    "dataset_url": "https://huggingface.co/datasets/Sudarshan2002/GenDS",
+    "dataset_license": "MIT",
+    "dataset_reported_bytes": 359803294663,
+    "code_license_confirmed": false,
+    "weights_license_confirmed": false,
+    "same_scene_inference_supported": true,
+    "included_in_primary_protocol": false,
+    "inclusion_condition": "Written license clarification plus a 10-scene structure-preservation and runtime smoke."
+  },
+  "severity_calibration": {
+    "uses_restoration_outputs": false,
+    "calibration_split_only": true,
+    "candidate_seed_count_per_scene_condition": 8,
+    "selection_rule": "Choose deterministic parameter bins and seeds before model inference by minimizing distance to the pooled A/B reference distribution.",
+    "matching_features": [
+      "input_psnr",
+      "input_ssim",
+      "input_lpips",
+      "mean_luminance_shift",
+      "contrast_ratio",
+      "radial_spectrum_distance"
+    ],
+    "acceptance_tolerances": {
+      "absolute_median_input_psnr_db": 0.5,
+      "absolute_median_input_ssim": 0.02,
+      "absolute_median_input_lpips": 0.03,
+      "standardized_energy_distance": 0.25
+    },
+    "failure_action": "Do not run restoration models; revise or reject the unmatched condition before opening development outputs."
+  },
+  "frozen_systems": [
+    {
+      "id": "mirage_cdd11_small",
+      "family": "functional_decomposition",
+      "upstream": "https://github.com/Amazingren/MIRAGE",
+      "license": "MIT",
+      "checkpoint_reported_mb": 111.8,
+      "checkpoint_available": true
+    },
+    {
+      "id": "promptir_all_in_one",
+      "family": "prompted_transformer",
+      "upstream": "https://github.com/va1shn9v/PromptIR",
+      "license": "Academic Public License, non-commercial",
+      "checkpoint_reported_bytes": 407050467,
+      "checkpoint_available": true
+    },
+    {
+      "id": "transweather",
+      "family": "weather_transformer",
+      "upstream": "https://github.com/Jeya-Maria-Jose/TransWeather",
+      "license": "MIT",
+      "checkpoint_available": true
+    },
+    {
+      "id": "adair_five_task",
+      "family": "frequency_adaptive_restoration",
+      "upstream": "https://github.com/c-yn/AdaIR",
+      "license": "MIT",
+      "checkpoint_available": true
+    },
+    {
+      "id": "vivnet_lovif",
+      "family": "brain_inspired_unet",
+      "upstream": "https://github.com/MingyuLiu1/CVPR26_LoViF_Challenges",
+      "license": "Apache-2.0",
+      "checkpoint_available": true
+    }
+  ],
+  "continuity_system": {
+    "id": "onerestore_cdd11",
+    "upstream": "https://github.com/gy65896/OneRestore",
+    "checkpoint_url": "https://huggingface.co/gy65896/OneRestore",
+    "checkpoint_repository_reported_bytes": 210264281,
+    "code_license_confirmed": false,
+    "checkpoint_license_confirmed": false,
+    "role": "report separately if permission is clarified; existing S1/S2b results remain historical evidence"
+  },
+  "real_endpoint": {
+    "name": "WeatherBench",
+    "official_repo": "https://github.com/guanqiyuan/WeatherBench",
+    "dataset_url": "https://huggingface.co/datasets/csgqy/WeatherBench",
+    "reported_total_bytes": 2361795112,
+    "reported_train_pairs": 41402,
+    "reported_test_pairs": 600,
+    "paired_ground_truth": true,
+    "license_confirmed": false,
+    "download_allowed": false,
+    "required_action": "Obtain written permission or an explicit dataset license before download/use."
+  },
+  "evaluation_matrix": {
+    "development_forwards": 12000,
+    "final_forwards": 24000,
+    "real_endpoint_forwards": 3000,
+    "formula": "scenes x 8 conditions x 3 mechanisms x 5 systems; real endpoint is 600 x 5",
+    "save_policy": "Save metrics, manifests, hashes and preregistered panels; do not archive every restored PNG.",
+    "inference_policy": "No prompt, task label, GT, test-time adaptation or per-image model selection unless the public checkpoint intrinsically requires a fixed blind interface."
+  },
+  "metrics": {
+    "raw": [
+      "input_psnr",
+      "input_ssim",
+      "input_lpips",
+      "output_psnr",
+      "output_ssim",
+      "output_lpips",
+      "psnr_gain",
+      "harm_indicator"
+    ],
+    "aggregates": [
+      "paired_mechanism_contrast",
+      "mechanism_spread",
+      "decision_reversal_rate",
+      "rank_stability_kendall_tau",
+      "worst_mechanism_score"
+    ],
+    "uncertainty": "scene-clustered bootstrap with 10000 draws",
+    "multiplicity": "Holm correction within each model x weather-family primary contrast family"
+  },
+  "primary_analysis": {
+    "conditions": [
+      "low_weak_rain_haze",
+      "low_strong_rain_haze",
+      "low_weak_snow_haze",
+      "low_strong_snow_haze"
+    ],
+    "primary_metric": "psnr_gain with output_psnr always reported beside it",
+    "effect_gate": "At least 3 of 5 systems must show an absolute paired mechanism contrast >= 0.20 dB with scene-bootstrap CI95 excluding zero in both rain-haze and snow-haze composite families.",
+    "consequence_gate": "At least 2 systems must show either decision-reversal rate >= 0.10 or a mechanism-pair harm-rate difference >= 0.05.",
+    "cue_gate": "Moment-matched generator decodability must remain >= 0.70 with clean-GT control <= 0.60.",
+    "ranking_gate": "Report Kendall tau for all three mechanism pairs; ranking reversal is evidence, not a mandatory gate.",
+    "stop_rule": "If severity matching fails, or the effect gate fails on locked final scenes, close the benchmark claim without tuning on final."
+  },
+  "execution_stages": [
+    "F0 metadata, license and novelty audit",
+    "F1 CPU renderer-C determinism and 10-scene structure smoke",
+    "F2 severity calibration on official BSDS500 train split only",
+    "F3 five-model adapter and runtime smoke on 20 development scenes",
+    "F4 full 100-scene development audit",
+    "F5 one-shot 200-scene final audit after commit and hashes are frozen",
+    "F6 WeatherBench endpoint only after explicit usage permission"
+  ],
+  "current_feasibility": {
+    "controlled_corpus_license": "PASS",
+    "controlled_manifest_materialized": "PASS",
+    "three_independent_mechanisms": "PASS",
+    "five_frozen_systems": "PASS_METADATA_ONLY",
+    "severity_matching": "PENDING_SMOKE",
+    "storage_compute_budget": "PENDING_MEASURED_SMOKE",
+    "real_endpoint_license": "BLOCKED_PERMISSION",
+    "novelty_search": "PASS_WITH_MONITORING"
+  },
+  "current_decision": "READY_FOR_F2_CPU_CALIBRATION"
+}

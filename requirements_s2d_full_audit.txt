@@ -1,0 +1,5 @@
+# Mechanism-C renderer core. These versions produced the frozen F1 pixel hashes.
+albumentations==2.0.8
+albucore==0.0.24
+numpy==2.2.6
+opencv-python-headless==5.0.0.93
