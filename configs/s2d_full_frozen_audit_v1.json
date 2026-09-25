@@ -1,7 +1,7 @@
 {
   "protocol_version": "s2d-full-frozen-audit-v1.0",
   "locked_at": "2026-09-25",
-  "status": "F2_V2_AMENDMENT_LOCKED_READY_FOR_ONE_FULL_CPU_RUN",
+  "status": "F2_V2_FAILED_RENDERER_C_REJECTED_NO_F3",
   "scientific_scope": {
     "question": "Do restoration conclusions and model rankings change when clean content, semantic degradation factors, severity stratum and evaluation code are held fixed but the degradation renderer changes?",
     "restoration_training_allowed": false,
@@ -125,6 +125,16 @@
     "v2_runtime_smoke_artifact": "results/2026-09-25_s2d_probe/s2d_f2_v2_runtime_smoke.json",
     "v2_runtime_smoke_sha256": "8148e943ab4ec1ee09de1f55ec858d57a101743faf4c1556d0b599a9a18c8399",
     "v2_projected_full_seconds": 2255.6700360000104,
+    "v2_full_run_consumed": true,
+    "v2_full_run_status": "FAIL_SEVERITY_MATCHING",
+    "v2_full_run_artifact": "results/2026-09-25_s2d_probe/s2d_f2_v2_calibration_full.json",
+    "v2_full_run_sha256": "6153cda0a32c5991d47b4c1a78a61b8346cb81e4818d7d7c6ff5d5ae906a998b",
+    "v2_full_run_elapsed_seconds": 2838.9623644000003,
+    "v2_selected_profiles": {"low": 1, "rain": 1, "snow": 7},
+    "v2_final_conditions_passed": 0,
+    "v2_final_failed_checks": 20,
+    "v2_result_audit": "results/2026-09-25_s2d_probe/s2d_f2_v2_result_audit.json",
+    "v2_result_audit_sha256": "f095c58cf51706b21f3ed0f93cc178eb5aa9650c4da069baf8741f52a5ae42cd",
     "uses_restoration_outputs": false,
     "calibration_split_only": true,
     "candidate_seed_count_per_scene_condition": 8,
@@ -262,10 +272,10 @@
     "controlled_manifest_materialized": "PASS",
     "three_independent_mechanisms": "PASS",
     "five_frozen_systems": "PASS_METADATA_ONLY",
-    "severity_matching": "F2_V2_PENDING_FULL",
+    "severity_matching": "FAIL_FINAL",
     "storage_compute_budget": "PENDING_MEASURED_SMOKE",
     "real_endpoint_license": "BLOCKED_PERMISSION",
     "novelty_search": "PASS_WITH_MONITORING"
   },
-  "current_decision": "READY_FOR_F2_V2_FULL_CPU_CALIBRATION"
+  "current_decision": "STOP_S2D_RENDERER_C_REJECTED_NO_F3"
 }

@@ -15,10 +15,10 @@ class S2DFullProtocolAuditTest(unittest.TestCase):
             repository / "configs" / "s2d_full_frozen_audit_v1.json"
         )
 
-    def test_locked_protocol_allows_exactly_one_f2_v2_cpu_run(self):
+    def test_locked_protocol_stops_after_the_one_f2_v2_run_fails(self):
         result = audit(self.config)
         self.assertEqual(result["status"], "VALID")
-        self.assertEqual(result["decision"], "READY_FOR_F2_V2_FULL_CPU_CALIBRATION")
+        self.assertEqual(result["decision"], "STOP_S2D_RENDERER_C_REJECTED_NO_F3")
         self.assertEqual(result["counts"]["frozen_systems"], 5)
         self.assertEqual(result["counts"]["development_forwards"], 12000)
         self.assertEqual(result["counts"]["final_forwards"], 24000)
